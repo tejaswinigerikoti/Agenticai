@@ -53,7 +53,7 @@ conn, table_name = get_db()
 st.title("💰 Your Finance Tracker")
 st.sidebar.write(f"👤 User: {st.session_state.user_id}")
 
-tab1, tab2, tab3 = st.tabs(["➕ Add Expense", "📊 View Expenses", "📈 Budget"])
+tab1, tab2, tab3 = st.tabs(["➕ Add Expense", "📊 View Expenses", "📈 Next Month Prediction"])
 
 # ---------------- TAB 1: ADD EXPENSE ----------------
 with tab1:
@@ -63,7 +63,6 @@ with tab1:
     with col1:
         date = st.date_input("Date", datetime.now())
         
-        # ✅ CUSTOM CATEGORY
         category = st.selectbox("Category", ["➕ Custom"] + [
             "Food", "Travel", "Education", "Entertainment", 
             "Shopping", "Bills", "Gym", "Medical", "Fuel", 
@@ -95,24 +94,32 @@ with tab1:
         except Exception as e:
             st.error(f"Error: {e}")
 
-# ---------------- TAB 2: VIEW EXPENSES (TABLE WITH HEADERS + DELETE + PIE CHART) ----------------
+# ---------------- TAB 2: VIEW EXPENSES (TABLE WITH DELETE COLUMN) ----------------
 with tab2:
     st.subheader("📊 Your Expenses")
     
     cursor = conn.cursor()
-    cursor.execute(f"SELECT * FROM {table_name} ORDER BY id DESC")
+    cursor.execute(f"SELECT id, date, amount, category, description FROM {table_name} ORDER BY id DESC")
     rows = cursor.fetchall()
     
     if not rows:
         st.info("📭 No expenses added yet!")
     else:
-        # ✅ TABLE WITH HEADERS (NO ID)
+        # ✅ TABLE WITH DELETE COLUMN INSIDE
         st.markdown("### 📋 Expense Table")
-        st.markdown("**Date** | **Amount** | **Category** | **Description** | **Delete**")
-        st.markdown("---" * 50)
         
+        # Header
+        header_col1, header_col2, header_col3, header_col4, header_col5 = st.columns([1.5,1,1.5,2,0.8])
+        header_col1.markdown("**Date**")
+        header_col2.markdown("**Amount**")
+        header_col3.markdown("**Category**")
+        header_col4.markdown("**Description**")
+        header_col5.markdown("**Action**")
+        st.markdown("---")
+        
+        # Rows with delete button
         for row in rows:
-            col1, col2, col3, col4, col5 = st.columns([1.5, 1, 1.5, 2, 0.5])
+            col1, col2, col3, col4, col5 = st.columns([1.5,1,1.5,2,0.8])
             
             with col1:
                 st.write(f"**{row[1]}**")
@@ -129,47 +136,52 @@ with tab2:
                     st.success("✅ Deleted!")
                     st.rerun()
         
-        # ✅ PIE CHART
+        # Charts
         col1, col2 = st.columns(2)
         with col1:
-            st.subheader("🥧 Spending Breakdown")
-            cursor = conn.cursor()
-            cursor.execute(f"SELECT category, SUM(amount) as total FROM {table_name} GROUP BY category")
+            cursor.execute(f"SELECT category, SUM(amount) FROM {table_name} GROUP BY category")
             pie_data = cursor.fetchall()
-            
             if pie_data:
-                categories = [row[0] for row in pie_data]
-                amounts = [row[1] for row in pie_data]
-                
+                categories = [x[0] for x in pie_data]
+                amounts = [x[1] for x in pie_data]
                 fig, ax = plt.subplots(figsize=(6,6))
                 ax.pie(amounts, labels=categories, autopct='%1.1f%%', startangle=90)
                 ax.axis('equal')
-                ax.set_title("Your Spending by Category")
                 st.pyplot(fig)
         
         with col2:
-            cursor = conn.cursor()
             cursor.execute(f"SELECT SUM(amount) FROM {table_name}")
             total = cursor.fetchone()[0] or 0
             st.metric("💎 Total Spent", f"₹{total:,.0f}")
 
-# ---------------- TAB 3: BUDGET ----------------
+# ---------------- TAB 3: NEXT MONTH PREDICTION ----------------
 with tab3:
+    st.subheader("📈 Next Month Expense Prediction")
+    
     cursor = conn.cursor()
-    cursor.execute(f"SELECT SUM(amount), AVG(amount), COUNT(*) FROM {table_name}")
+    cursor.execute(f"SELECT SUM(amount), COUNT(*) FROM {table_name}")
     result = cursor.fetchone()
     
     if result[0]:
-        total, avg, count = result
+        total_expenses = result[0]
+        total_count = result[1]
+        avg_daily = total_expenses / total_count if total_count > 0 else 0
+        
+        days_in_month = 30
+        current_month_estimate = avg_daily * days_in_month
+        next_month_prediction = current_month_estimate * 1.1
+        
         col1, col2 = st.columns(2)
         with col1:
-            st.metric("💰 Total", f"₹{total:,.0f}")
-            st.metric("📊 Average", f"₹{avg:,.0f}")
+            st.metric("💰 Total Spent", f"₹{total_expenses:,.0f}")
+            st.metric("📊 Avg Per Expense", f"₹{avg_daily:,.0f}")
+        
         with col2:
-            st.success(f"📈 Monthly Estimate: ₹{total*1.1:,.0f}")
-            st.metric("📅 Transactions", count)
+            st.metric("📅 Current Month", f"₹{current_month_estimate:,.0f}")
+            st.success(f"🎯 **Next Month**: ₹{next_month_prediction:,.0f}")
+            st.info(f"💡 **Save**: ₹{next_month_prediction*0.2:,.0f}")
     else:
-        st.info("Add expenses to see budget insights!")
+        st.info("📊 Add expenses first!")
 
 if st.sidebar.button("🚪 Logout"):
     st.session_state.clear()
