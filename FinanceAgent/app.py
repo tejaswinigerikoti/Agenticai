@@ -8,7 +8,7 @@ import hashlib
 # Page config
 st.set_page_config(page_title="💰 Private Finance Manager", layout="wide")
 
-# ---------------- GLOBAL CONNECTION (Fixed) ----------------
+# ---------------- GLOBAL CONNECTION ----------------
 @st.cache_resource
 def init_db():
     conn = sqlite3.connect('finance.db', check_same_thread=False)
@@ -19,7 +19,6 @@ conn = init_db()
 # ---------------- AUTH & USER ISOLATION ----------------
 if 'user_email' not in st.session_state:
     st.session_state.user_email = None
-    st.session_state.user_table = None
 
 def login_page():
     st.title("🔐 Login to Your Private Finance")
@@ -50,7 +49,7 @@ if not st.session_state.user_email:
     login_page()
     st.stop()
 
-# ---------------- USER TABLE SETUP (Fixed) ----------------
+# ---------------- USER TABLE SETUP ----------------
 def get_user_table():
     user_id = hashlib.md5(st.session_state.user_email.encode()).hexdigest()[:8]
     user_table = f"expenses_{user_id}"
@@ -78,7 +77,7 @@ if st.sidebar.button("🚪 Logout"):
 menu = ["➕ Add Expense", "📊 View Expenses", "📈 Budget"]
 choice = st.sidebar.selectbox("Choose:", menu)
 
-# ---------------- FUNCTIONS (Fixed SQLite Errors) ----------------
+# ---------------- FUNCTIONS ----------------
 
 def add_expense():
     st.subheader("➕ Add Your Private Expense")
@@ -88,33 +87,34 @@ def add_expense():
     with col1:
         date = st.date_input("📅 Date", value=datetime.now().date())
         
-        # 🔥 CUSTOM CATEGORY SYSTEM
+        # 🔥 CUSTOM CATEGORY
         category_options = ["Food", "Travel", "Education", "Entertainment", "Shopping", "Bills", "Gym", "Medical", "Gifts", "Fuel"]
-        selected_category = st.selectbox("🏷️ Category (➕ Add New):", ["➕ Add New"] + category_options)
+        selected_category = st.selectbox("🏷️ Category:", ["➕ Add New"] + category_options)
         
         if selected_category == "➕ Add New":
-            new_category = st.text_input("✨ Enter category:", placeholder="Rent, Netflix, Petrol")
+            new_category = st.text_input("✨ New category:", placeholder="Rent, Netflix, Petrol")
             final_category = new_category.strip() if new_category.strip() else "Other"
         else:
             final_category = selected_category
-        
-        st.caption(f"📋 Category: **{final_category}**")
     
     with col2:
         amount = st.number_input("💰 Amount (₹)", min_value=0.01, step=10.0, format="%.0f")
         description = st.text_input("📝 Description")
     
-    if st.button("✅ Save Expense", type="primary"):
+    if st.button("✅ Add Expense", type="primary"):
         try:
             cursor = conn.cursor()
             cursor.execute(f"INSERT INTO {user_table} VALUES(?,?,?,?)", 
                           (str(date), float(amount), final_category, description))
             conn.commit()
-            st.success(f"✅ Saved ₹{amount:,} → {final_category}")
-            st.balloons()
+            
+            # ✅ SIMPLE MESSAGE ONLY
+            st.success("Expense added successfully!")
+            
             st.rerun()
+            
         except Exception as e:
-            st.error(f"Error: {e}")
+            st.error(f"❌ Error: {e}")
 
 def view_expenses():
     st.subheader("📊 Your Private Expenses")
@@ -125,10 +125,9 @@ def view_expenses():
         data = pd.DataFrame()
     
     if data.empty:
-        st.warning("📭 No expenses yet. Add some!")
+        st.warning("📭 No expenses yet. Add some first!")
         return
     
-    # Data table
     st.dataframe(data.style.format({'amount': '₹{:,.0f}'}), use_container_width=True)
     
     col1, col2 = st.columns(2)
@@ -136,8 +135,9 @@ def view_expenses():
     with col1:
         category_sum = data.groupby('category')['amount'].sum().sort_values(ascending=False)
         fig, ax = plt.subplots(figsize=(8,6))
-        ax.pie(category_sum.values, labels=category_sum.index, autopct='%1.1f%%', startangle=90)
-        ax.set_title("Your Spending")
+        wedges, texts, autotexts = ax.pie(category_sum.values, labels=category_sum.index, autopct='%1.1f%%', startangle=90)
+        plt.setp(autotexts, size=10, weight="bold")
+        ax.set_title("Your Spending Breakdown")
         st.pyplot(fig)
     
     with col2:
@@ -164,12 +164,13 @@ def budget_predict():
     
     col1, col2 = st.columns(2)
     with col1:
-        st.metric("💰 Total", f"₹{total_spent:,.0f}")
-        st.metric("📅 Days", days)
+        st.metric("💰 Total Spent", f"₹{total_spent:,.0f}")
+        st.metric("📅 Days Tracked", days)
     
     with col2:
         predicted_month = avg_daily * 30
-        st.success(f"📈 Monthly Prediction: ₹{predicted_month:,.0f}")
+        st.success(f"📈 **Monthly Prediction**: ₹{predicted_month:,.0f}")
+        st.info(f"💡 **Suggested Savings**: ₹{predicted_month*0.2:,.0f}")
 
 # ---------------- MAIN EXECUTION ----------------
 if choice == "➕ Add Expense":
@@ -180,4 +181,4 @@ elif choice == "📈 Budget":
     budget_predict()
 
 st.markdown("---")
-st.caption("🔒 Private data per user | Deployed on Streamlit Cloud")
+st.caption("🔒 Your data is 100% private | Custom categories supported")
