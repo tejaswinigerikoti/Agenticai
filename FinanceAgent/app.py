@@ -19,6 +19,7 @@ conn = init_db()
 # ---------------- AUTH & USER ISOLATION ----------------
 if 'user_email' not in st.session_state:
     st.session_state.user_email = None
+    st.session_state.show_success = False
 
 def login_page():
     st.title("🔐 Login to Your Private Finance")
@@ -38,11 +39,13 @@ def login_page():
         if st.button("🚀 Login", type="primary", use_container_width=True):
             if email and password:
                 st.session_state.user_email = email
+                st.session_state.show_success = False
                 st.rerun()
     
     with col2:
         if st.button("👤 Guest Mode", use_container_width=True):
             st.session_state.user_email = f"guest_{hashlib.md5(str(datetime.now()).encode()).hexdigest()[:8]}@demo.com"
+            st.session_state.show_success = False
             st.rerun()
 
 if not st.session_state.user_email:
@@ -101,20 +104,30 @@ def add_expense():
         amount = st.number_input("💰 Amount (₹)", min_value=0.01, step=10.0, format="%.0f")
         description = st.text_input("📝 Description")
     
-    if st.button("✅ Add Expense", type="primary"):
-        try:
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("✅ Add Expense", type="primary", use_container_width=True):
             cursor = conn.cursor()
             cursor.execute(f"INSERT INTO {user_table} VALUES(?,?,?,?)", 
                           (str(date), float(amount), final_category, description))
             conn.commit()
-            
-            # ✅ SIMPLE MESSAGE ONLY
-            st.success("Expense added successfully!")
-            
-            st.rerun()
-            
-        except Exception as e:
-            st.error(f"❌ Error: {e}")
+            st.session_state.show_success = True
+    
+    # ✅ SUCCESS MESSAGE - Now guaranteed to show!
+    if st.session_state.show_success:
+        st.success("✅ Expense added successfully!")
+        st.info("👆 Click 'Add Another' or go to View Expenses")
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("➕ Add Another Expense", use_container_width=True):
+                st.session_state.show_success = False
+                st.rerun()
+        with col2:
+            if st.button("📊 View Expenses", use_container_width=True):
+                st.session_state.show_success = False
+                st.session_state.menu_choice = "📊 View Expenses"
+                st.rerun()
 
 def view_expenses():
     st.subheader("📊 Your Private Expenses")
@@ -143,8 +156,10 @@ def view_expenses():
     with col2:
         total = data['amount'].sum()
         avg = data['amount'].mean()
+        count = len(data)
         st.metric("💎 Total Spent", f"₹{total:,.0f}")
         st.metric("📊 Avg Expense", f"₹{avg:.0f}")
+        st.metric("📈 Transactions", count)
 
 def budget_predict():
     st.subheader("📈 Your Budget Insights")
@@ -166,11 +181,13 @@ def budget_predict():
     with col1:
         st.metric("💰 Total Spent", f"₹{total_spent:,.0f}")
         st.metric("📅 Days Tracked", days)
+        st.metric("📊 Avg Daily", f"₹{avg_daily:.0f}")
     
     with col2:
         predicted_month = avg_daily * 30
+        savings_goal = predicted_month * 0.2
         st.success(f"📈 **Monthly Prediction**: ₹{predicted_month:,.0f}")
-        st.info(f"💡 **Suggested Savings**: ₹{predicted_month*0.2:,.0f}")
+        st.info(f"💡 **Save**: ₹{savings_goal:,.0f} per month")
 
 # ---------------- MAIN EXECUTION ----------------
 if choice == "➕ Add Expense":
