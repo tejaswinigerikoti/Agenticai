@@ -1,188 +1,44 @@
-import streamlit as st
-import pandas as pd
-import sqlite3
-from datetime import datetime
-import matplotlib.pyplot as plt
-import hashlib
-
-st.set_page_config(page_title="💰 Finance Manager", layout="wide")
-
-# ---------------- SIMPLE LOGIN ----------------
-if 'logged_in' not in st.session_state:
-    st.session_state.logged_in = False
-    st.session_state.user_id = None
-
-if not st.session_state.logged_in:
-    st.title("🔐 Login")
-    col1, col2 = st.columns(2)
+def view_expenses():
+    st.subheader("📊 Current Month Expenses")
+    data = get_current_month_data()
     
-    with col1:
-        email = st.text_input("Email", "user1@gmail.com")
-        password = st.text_input("Password", type="password", value="123456")
+    if data.empty:
+        st.info("📭 No expenses!")
+        return
     
-    with col2:
-        st.info("**Demo Login:**\nuser1@gmail.com\n123456")
+    # ✅ SIMPLE TABLE WITH DELETE COLUMN
+    st.markdown("### 📋 Expenses")
     
-    if st.button("Login"):
-        st.session_state.logged_in = True
-        st.session_state.user_id = hashlib.md5(email.encode()).hexdigest()[:8]
-        st.rerun()
-    st.stop()
-
-# ---------------- DATABASE ----------------
-def get_db():
-    conn = sqlite3.connect('finance.db', check_same_thread=False)
-    table_name = f"expenses_{st.session_state.user_id}"
+    # Header row
+    header_col1, header_col2, header_col3, header_col4, header_col5 = st.columns(5)
+    with header_col1: st.markdown("**Date**")
+    with header_col2: st.markdown("**Amount**")
+    with header_col3: st.markdown("**Category**")
+    with header_col4: st.markdown("**Description**")
+    with header_col5: st.markdown("**Delete**")
     
-    cursor = conn.cursor()
-    cursor.execute(f"""
-        CREATE TABLE IF NOT EXISTS {table_name} (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            date TEXT,
-            amount REAL,
-            category TEXT,
-            description TEXT
-        )
-    """)
-    conn.commit()
-    return conn, table_name
-
-conn, table_name = get_db()
-
-# ---------------- UI ----------------
-st.title("💰 Your Finance Tracker")
-st.sidebar.write(f"👤 User: {st.session_state.user_id}")
-
-tab1, tab2, tab3 = st.tabs(["➕ Add Expense", "📊 View Expenses", "📈 Next Month Prediction"])
-
-# ---------------- TAB 1: ADD EXPENSE ----------------
-with tab1:
-    st.subheader("➕ Add Expense")
+    st.markdown("---")
     
+    # Data rows
+    for idx, row in data.iterrows():
+        col1, col2, col3, col4, col5 = st.columns(5)
+        with col1: st.write(row['date'])
+        with col2: st.write(f"₹{row['amount']:,.0f}")
+        with col3: st.write(row['category'])
+        with col4: st.write(row['description'] or '-')
+        with col5: 
+            if st.button("🗑️", key=f"del_{row['id']}"):
+                delete_expense(row['id'])
+    
+    # Pie chart + metrics (same)
     col1, col2 = st.columns(2)
     with col1:
-        date = st.date_input("Date", datetime.now())
-        
-        category = st.selectbox("Category", ["➕ Custom"] + [
-            "Food", "Travel", "Education", "Entertainment", 
-            "Shopping", "Bills", "Gym", "Medical", "Fuel", 
-            "Rent", "Netflix"
-        ])
-        
-        if category == "➕ Custom":
-            custom_category = st.text_input("✏️ Enter your category:", 
-                                          placeholder="Ex: Gifts, Petrol, Snacks")
-            final_category = custom_category if custom_category else "Other"
-        else:
-            final_category = category
-        
-        st.info(f"**Selected Category**: {final_category}")
+        cat_sum = data.groupby('category')['amount'].sum().sort_values(ascending=False)
+        fig, ax = plt.subplots(figsize=(6,6))
+        ax.pie(cat_sum.values, labels=cat_sum.index, autopct='%1.1f%%')
+        ax.axis('equal')
+        st.pyplot(fig)
     
     with col2:
-        amount = st.number_input("Amount (₹)", min_value=1.0, step=10.0)
-        desc = st.text_input("Description")
-    
-    if st.button("✅ Save Expense", type="primary"):
-        try:
-            cursor = conn.cursor()
-            cursor.execute(f"""
-                INSERT INTO {table_name} (date, amount, category, description)
-                VALUES (?, ?, ?, ?)
-            """, (str(date), amount, final_category, desc))
-            conn.commit()
-            st.success("✅ **Expense Successfully Saved!**")
-        except Exception as e:
-            st.error(f"Error: {e}")
-
-# ---------------- TAB 2: VIEW EXPENSES (TABLE WITH DELETE COLUMN) ----------------
-with tab2:
-    st.subheader("📊 Your Expenses")
-    
-    cursor = conn.cursor()
-    cursor.execute(f"SELECT id, date, amount, category, description FROM {table_name} ORDER BY id DESC")
-    rows = cursor.fetchall()
-    
-    if not rows:
-        st.info("📭 No expenses added yet!")
-    else:
-        # ✅ TABLE WITH DELETE COLUMN INSIDE
-        st.markdown("### 📋 Expense Table")
-        
-        # Header
-        header_col1, header_col2, header_col3, header_col4, header_col5 = st.columns([1.5,1,1.5,2,0.8])
-        header_col1.markdown("**Date**")
-        header_col2.markdown("**Amount**")
-        header_col3.markdown("**Category**")
-        header_col4.markdown("**Description**")
-        header_col5.markdown("**Action**")
-        st.markdown("---")
-        
-        # Rows with delete button
-        for row in rows:
-            col1, col2, col3, col4, col5 = st.columns([1.5,1,1.5,2,0.8])
-            
-            with col1:
-                st.write(f"**{row[1]}**")
-            with col2:
-                st.write(f"**₹{row[2]:,.0f}**")
-            with col3:
-                st.write(f"**{row[3]}**")
-            with col4:
-                st.write(row[4] or "-")
-            with col5:
-                if st.button("🗑️", key=f"del_{row[0]}"):
-                    cursor.execute(f"DELETE FROM {table_name} WHERE id=?", (row[0],))
-                    conn.commit()
-                    st.success("✅ Deleted!")
-                    st.rerun()
-        
-        # Charts
-        col1, col2 = st.columns(2)
-        with col1:
-            cursor.execute(f"SELECT category, SUM(amount) FROM {table_name} GROUP BY category")
-            pie_data = cursor.fetchall()
-            if pie_data:
-                categories = [x[0] for x in pie_data]
-                amounts = [x[1] for x in pie_data]
-                fig, ax = plt.subplots(figsize=(6,6))
-                ax.pie(amounts, labels=categories, autopct='%1.1f%%', startangle=90)
-                ax.axis('equal')
-                st.pyplot(fig)
-        
-        with col2:
-            cursor.execute(f"SELECT SUM(amount) FROM {table_name}")
-            total = cursor.fetchone()[0] or 0
-            st.metric("💎 Total Spent", f"₹{total:,.0f}")
-
-# ---------------- TAB 3: NEXT MONTH PREDICTION ----------------
-with tab3:
-    st.subheader("📈 Next Month Expense Prediction")
-    
-    cursor = conn.cursor()
-    cursor.execute(f"SELECT SUM(amount), COUNT(*) FROM {table_name}")
-    result = cursor.fetchone()
-    
-    if result[0]:
-        total_expenses = result[0]
-        total_count = result[1]
-        avg_daily = total_expenses / total_count if total_count > 0 else 0
-        
-        days_in_month = 30
-        current_month_estimate = avg_daily * days_in_month
-        next_month_prediction = current_month_estimate * 1.1
-        
-        col1, col2 = st.columns(2)
-        with col1:
-            st.metric("💰 Total Spent", f"₹{total_expenses:,.0f}")
-            st.metric("📊 Avg Per Expense", f"₹{avg_daily:,.0f}")
-        
-        with col2:
-            st.metric("📅 Current Month", f"₹{current_month_estimate:,.0f}")
-            st.success(f"🎯 **Next Month**: ₹{next_month_prediction:,.0f}")
-            st.info(f"💡 **Save**: ₹{next_month_prediction*0.2:,.0f}")
-    else:
-        st.info("📊 Add expenses first!")
-
-if st.sidebar.button("🚪 Logout"):
-    st.session_state.clear()
-    st.rerun()
+        total = data['amount'].sum()
+        st.metric("This Month", f"₹{total:,.0f}")
