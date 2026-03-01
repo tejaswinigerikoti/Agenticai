@@ -44,11 +44,12 @@ if not st.session_state.user_email:
     login_page()
     st.stop()
 
-# ---------------- DATABASE ----------------
+# ---------------- DATABASE - FIXED ----------------
 @st.cache_resource(ttl=300)
 def get_user_connection():
     user_id = hashlib.md5(st.session_state.user_email.encode()).hexdigest()[:8]
     user_table = f"expenses_{user_id}"
+    st.session_state.user_table = user_table
     
     conn = sqlite3.connect('finance.db', check_same_thread=False, timeout=30)
     cursor = conn.cursor()
@@ -63,7 +64,6 @@ def get_user_connection():
         )
     ''')
     conn.commit()
-    st.session_state.user_table = user_table
     return conn
 
 conn = get_user_connection()
@@ -108,17 +108,16 @@ def add_expense():
             cursor.execute(f"INSERT INTO {user_table} (date, amount, category, description) VALUES(?,?,?,?)", 
                           (str(date_input), amount, category, desc))
             conn.commit()
-            st.success(f"✅ **Expense Successfully Saved!** ₹{amount:,.0f} - {category}")
+            st.success(f"✅ **Successfully Added!** ₹{amount:,.0f} - {category}")
             st.rerun()
         except Exception as e:
             st.error(f"Save error: {e}")
 
-# ---------------- VIEW EXPENSES - FIXED COLUMNS ----------------
+# ---------------- VIEW EXPENSES - CLEAN ----------------
 def view_expenses():
     st.subheader("📊 Your Expenses")
     
     try:
-        # ✅ FIXED: SELECT only 5 columns
         cursor = conn.cursor()
         cursor.execute(f"SELECT id, date, amount, category, description FROM {user_table} ORDER BY date DESC")
         rows = cursor.fetchall()
@@ -126,9 +125,6 @@ def view_expenses():
         if not rows:
             st.info("📭 No expenses added yet!")
             return
-        
-        # ✅ FIXED: Exactly 5 columns
-        df = pd.DataFrame(rows, columns=['ID', 'Date', 'Amount', 'Category', 'Description'])
         
         # Table headers
         header_col1, header_col2, header_col3, header_col4, header_col5 = st.columns([1.2,1,1.2,1.8,0.8])
@@ -139,7 +135,7 @@ def view_expenses():
         header_col5.markdown("**Delete**")
         st.markdown("─" * 80)
         
-        # Rows with delete
+        # Rows with delete button
         for row in rows:
             col1, col2, col3, col4, col5 = st.columns([1.2,1,1.2,1.8,0.8])
             with col1: st.write(row[1])
@@ -153,56 +149,55 @@ def view_expenses():
                     st.success("✅ Deleted!")
                     st.rerun()
         
-        # Charts
+        # Charts only
         col1, col2 = st.columns(2)
         with col1:
-            cat_sum = df.groupby('Category')['Amount'].sum()
-            if len(cat_sum) > 0:
+            cursor.execute(f"SELECT category, SUM(amount) FROM {user_table} GROUP BY category")
+            pie_data = cursor.fetchall()
+            if pie_data:
+                categories = [x[0] for x in pie_data]
+                amounts = [x[1] for x in pie_data]
                 fig, ax = plt.subplots(figsize=(6,6))
-                ax.pie(cat_sum.values, labels=cat_sum.index, autopct='%1.1f%%')
+                ax.pie(amounts, labels=categories, autopct='%1.1f%%', startangle=90)
                 ax.axis('equal')
                 st.pyplot(fig)
         
-        with col2:
-            total = df['Amount'].sum()
-            st.metric("💰 Total Spent", f"₹{total:,.0f}")
-            st.metric("📊 Count", len(df))
-            
     except Exception as e:
-        st.error(f"View error: {str(e)}")
+        st.error(f"View error: {e}")
 
-# ---------------- PREDICTION ----------------
+# ---------------- PREDICTION - PRESENT DATE VARAKU ----------------
 def budget_predict():
     st.subheader("📈 Next Month Prediction")
     
     try:
         cursor = conn.cursor()
-        cursor.execute(f"SELECT SUM(amount), COUNT(*) FROM {user_table}")
+        cursor.execute(f"SELECT SUM(amount) FROM {user_table}")
         result = cursor.fetchone()
         
-        if result[0] == None:
+        if result[0] is None:
             st.warning("Add expenses first!")
             return
         
-        total_spent, count = result
-        avg_per_expense = total_spent / count if count > 0 else 0
+        # Present date varaku total spent
+        total_spent_till_today = result[0]
+        days_passed = date.today().day
+        avg_daily = total_spent_till_today / len(rows) if 'rows' in locals() and len(rows) > 0 else 0
         
         # Conservative prediction
-        current_month_low = avg_per_expense * 25
+        current_month_low = avg_daily * 25
         next_month_low = current_month_low * 0.9
         
         col1, col2 = st.columns(2)
         with col1:
-            st.metric("💰 Total Spent", f"₹{total_spent:,.0f}")
-            st.metric("📊 Avg Expense", f"₹{avg_per_expense:,.0f}")
-            st.metric("📈 Transactions", count)
+            st.metric("💰 **Spent Till Today**", f"₹{total_spent_till_today:,.0f}")
+            st.metric("📅 Days Passed", days_passed)
         
         with col2:
-            st.metric("📅 Current Month (Low)", f"₹{current_month_low:,.0f}")
-            st.success(f"🎯 **Next Month**: ₹{next_month_low:,.0f}")
+            st.metric("📈 Current Month (Low)", f"₹{current_month_low:,.0f}")
+            st.success(f"🎯 **Next Month Prediction**: ₹{next_month_low:,.0f}")
             
     except Exception as e:
-        st.error(f"Prediction error: {str(e)}")
+        st.error(f"Prediction error: {e}")
 
 # ---------------- MAIN ----------------
 if choice == "➕ Add Expense":
