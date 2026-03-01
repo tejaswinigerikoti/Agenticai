@@ -95,7 +95,7 @@ with tab1:
         except Exception as e:
             st.error(f"Error: {e}")
 
-# ---------------- TAB 2: VIEW EXPENSES (TABLE + DELETE + PIE CHART) ----------------
+# ---------------- TAB 2: VIEW EXPENSES (TABLE WITH HEADERS + DELETE + PIE CHART) ----------------
 with tab2:
     st.subheader("📊 Your Expenses")
     
@@ -106,25 +106,25 @@ with tab2:
     if not rows:
         st.info("📭 No expenses added yet!")
     else:
-        df = pd.DataFrame(rows, columns=['ID', 'Date', 'Amount', 'Category', 'Description'])
+        # ✅ TABLE WITH HEADERS (NO ID)
+        st.markdown("### 📋 Expense Table")
+        st.markdown("**Date** | **Amount** | **Category** | **Description** | **Delete**")
+        st.markdown("---" * 50)
         
-        # ✅ TABLE WITH DELETE COLUMN
-        for idx, row in df.iterrows():
-            col1, col2, col3, col4, col5, col6 = st.columns([1,1,1,2,2,0.5])
+        for row in rows:
+            col1, col2, col3, col4, col5 = st.columns([1.5, 1, 1.5, 2, 0.5])
             
             with col1:
-                st.write(f"**{row['Date']}**")
+                st.write(f"**{row[1]}**")
             with col2:
-                st.write(f"₹{row['Amount']:,.0f}")
+                st.write(f"**₹{row[2]:,.0f}**")
             with col3:
-                st.write(f"{row['Category']}")
+                st.write(f"**{row[3]}**")
             with col4:
-                st.write(row['Description'])
+                st.write(row[4] or "-")
             with col5:
-                st.write(f"ID: {row['ID']}")
-            with col6:
-                if st.button("🗑️", key=f"del_{row['ID']}"):
-                    cursor.execute(f"DELETE FROM {table_name} WHERE id=?", (row['ID'],))
+                if st.button("🗑️", key=f"del_{row[0]}"):
+                    cursor.execute(f"DELETE FROM {table_name} WHERE id=?", (row[0],))
                     conn.commit()
                     st.success("✅ Deleted!")
                     st.rerun()
@@ -133,35 +133,43 @@ with tab2:
         col1, col2 = st.columns(2)
         with col1:
             st.subheader("🥧 Spending Breakdown")
-            cat_spending = df.groupby('Category')['Amount'].sum()
-            fig, ax = plt.subplots(figsize=(6,6))
-            ax.pie(cat_spending.values, labels=cat_spending.index, autopct='%1.1f%%', startangle=90)
-            ax.axis('equal')
-            st.pyplot(fig)
+            cursor = conn.cursor()
+            cursor.execute(f"SELECT category, SUM(amount) as total FROM {table_name} GROUP BY category")
+            pie_data = cursor.fetchall()
+            
+            if pie_data:
+                categories = [row[0] for row in pie_data]
+                amounts = [row[1] for row in pie_data]
+                
+                fig, ax = plt.subplots(figsize=(6,6))
+                ax.pie(amounts, labels=categories, autopct='%1.1f%%', startangle=90)
+                ax.axis('equal')
+                ax.set_title("Your Spending by Category")
+                st.pyplot(fig)
         
         with col2:
-            total = df['Amount'].sum()
-            avg = df['Amount'].mean()
+            cursor = conn.cursor()
+            cursor.execute(f"SELECT SUM(amount) FROM {table_name}")
+            total = cursor.fetchone()[0] or 0
             st.metric("💎 Total Spent", f"₹{total:,.0f}")
-            st.metric("📊 Avg Expense", f"₹{avg:,.0f}")
 
 # ---------------- TAB 3: BUDGET ----------------
 with tab3:
     cursor = conn.cursor()
-    cursor.execute(f"SELECT * FROM {table_name}")
-    rows = cursor.fetchall()
+    cursor.execute(f"SELECT SUM(amount), AVG(amount), COUNT(*) FROM {table_name}")
+    result = cursor.fetchone()
     
-    if rows:
-        df = pd.DataFrame(rows, columns=['ID', 'Date', 'Amount', 'Category', 'Description'])
-        total = df['Amount'].sum()
-        avg = df['Amount'].mean()
-        
+    if result[0]:
+        total, avg, count = result
         col1, col2 = st.columns(2)
         with col1:
             st.metric("💰 Total", f"₹{total:,.0f}")
             st.metric("📊 Average", f"₹{avg:,.0f}")
         with col2:
             st.success(f"📈 Monthly Estimate: ₹{total*1.1:,.0f}")
+            st.metric("📅 Transactions", count)
+    else:
+        st.info("Add expenses to see budget insights!")
 
 if st.sidebar.button("🚪 Logout"):
     st.session_state.clear()
