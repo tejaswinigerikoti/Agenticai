@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import sqlite3
 from datetime import datetime
+import matplotlib.pyplot as plt
 import hashlib
 
 st.set_page_config(page_title="💰 Finance Manager", layout="wide")
@@ -91,11 +92,10 @@ with tab1:
             """, (str(date), amount, final_category, desc))
             conn.commit()
             st.success("✅ **Expense Successfully Saved!**")
-            # ✅ NO BALLOONS
         except Exception as e:
             st.error(f"Error: {e}")
 
-# ---------------- TAB 2: VIEW EXPENSES ----------------
+# ---------------- TAB 2: VIEW EXPENSES (TABLE + DELETE + PIE CHART) ----------------
 with tab2:
     st.subheader("📊 Your Expenses")
     
@@ -108,33 +108,42 @@ with tab2:
     else:
         df = pd.DataFrame(rows, columns=['ID', 'Date', 'Amount', 'Category', 'Description'])
         
-        # Beautiful table
-        st.dataframe(
-            df.style.format({'Amount': '₹{:,.0f}'}),
-            use_container_width=True
-        )
-        
-        # Delete buttons
-        st.subheader("🗑️ Delete Expense")
-        for row in rows:
-            col1, col2 = st.columns([4, 1])
+        # ✅ TABLE WITH DELETE COLUMN
+        for idx, row in df.iterrows():
+            col1, col2, col3, col4, col5, col6 = st.columns([1,1,1,2,2,0.5])
+            
             with col1:
-                st.write(f"**{row[1]}** | ₹{row[2]:,.0f} | {row[3]}")
+                st.write(f"**{row['Date']}**")
             with col2:
-                if st.button("🗑️", key=f"del_{row[0]}"):
-                    cursor.execute(f"DELETE FROM {table_name} WHERE id=?", (row[0],))
+                st.write(f"₹{row['Amount']:,.0f}")
+            with col3:
+                st.write(f"{row['Category']}")
+            with col4:
+                st.write(row['Description'])
+            with col5:
+                st.write(f"ID: {row['ID']}")
+            with col6:
+                if st.button("🗑️", key=f"del_{row['ID']}"):
+                    cursor.execute(f"DELETE FROM {table_name} WHERE id=?", (row['ID'],))
                     conn.commit()
                     st.success("✅ Deleted!")
                     st.rerun()
         
-        # Charts
+        # ✅ PIE CHART
         col1, col2 = st.columns(2)
         with col1:
+            st.subheader("🥧 Spending Breakdown")
             cat_spending = df.groupby('Category')['Amount'].sum()
-            st.bar_chart(cat_spending)
+            fig, ax = plt.subplots(figsize=(6,6))
+            ax.pie(cat_spending.values, labels=cat_spending.index, autopct='%1.1f%%', startangle=90)
+            ax.axis('equal')
+            st.pyplot(fig)
         
         with col2:
-            st.metric("Total Spent", f"₹{df['Amount'].sum():,.0f}")
+            total = df['Amount'].sum()
+            avg = df['Amount'].mean()
+            st.metric("💎 Total Spent", f"₹{total:,.0f}")
+            st.metric("📊 Avg Expense", f"₹{avg:,.0f}")
 
 # ---------------- TAB 3: BUDGET ----------------
 with tab3:
