@@ -53,10 +53,14 @@ def get_user_connection():
     conn = sqlite3.connect('finance.db', check_same_thread=False, timeout=20)
     cursor = conn.cursor()
     
+    # ✅ FIXED SQL SYNTAX
     cursor.execute(f'''
-        CREATE TABLE IF NOT NOT EXISTS {user_table}(
+        CREATE TABLE IF NOT EXISTS {user_table}(
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            date TEXT, amount REAL, category TEXT, description TEXT, 
+            date TEXT, 
+            amount REAL, 
+            category TEXT, 
+            description TEXT, 
             is_deleted INTEGER DEFAULT 0
         )
     ''')
@@ -83,21 +87,6 @@ def get_current_month_data():
     except:
         return pd.DataFrame()
 
-def get_previous_month_total():
-    try:
-        today = date.today()
-        prev_month = (today.replace(day=1) - date.timedelta(days=1)).strftime('%Y-%m')
-        cursor = conn.cursor()
-        cursor.execute(f'''
-            SELECT COALESCE(SUM(amount), 0) 
-            FROM {user_table} 
-            WHERE date LIKE '{prev_month}%' AND is_deleted = 0
-        ''')
-        result = cursor.fetchone()
-        return result[0] if result and result[0] is not None else 0
-    except:
-        return 0
-
 def delete_expense(expense_id):
     try:
         cursor = conn.cursor()
@@ -105,7 +94,7 @@ def delete_expense(expense_id):
         conn.commit()
         st.success("✅ Deleted!")
         st.rerun()
-    except:
+    except Exception as e:
         st.error("Delete failed!")
 
 # ---------------- UI ----------------
@@ -120,7 +109,7 @@ if st.sidebar.button("🚪 Logout"):
 menu = ["➕ Add Expense", "📊 View Expenses", "📈 Next Month Prediction"]
 choice = st.sidebar.selectbox("Choose:", menu)
 
-# ---------------- FUNCTIONS ----------------
+# ---------------- ADD EXPENSE ----------------
 def add_expense():
     st.subheader("➕ Add Expense")
     col1, col2 = st.columns(2)
@@ -153,77 +142,82 @@ def add_expense():
         except Exception as e:
             st.error(f"Save error: {e}")
 
+# ---------------- VIEW EXPENSES ----------------
 def view_expenses():
     st.subheader("📊 Current Month Expenses")
     data = get_current_month_data()
     
     if data.empty:
-        st.info("📭 No expenses!")
+        st.info("📭 No expenses this month!")
         return
     
-    # ✅ TABLE WITH HEADERS + INLINE DELETE
+    # ✅ PERFECT TABLE WITH INLINE DELETE
+    st.markdown("### 📋 Expenses Table")
+    
+    # Headers
     header_col1, header_col2, header_col3, header_col4, header_col5 = st.columns([1.2,1,1.2,1.8,0.8])
     header_col1.markdown("**Date**")
     header_col2.markdown("**Amount**")
     header_col3.markdown("**Category**")
     header_col4.markdown("**Description**")
     header_col5.markdown("**Action**")
-    
     st.markdown("─" * 80)
     
+    # Rows
     for idx, row in data.iterrows():
         col1, col2, col3, col4, col5 = st.columns([1.2,1,1.2,1.8,0.8])
-        col1.write(row['date'])
-        col2.write(f"**₹{row['amount']:,.0f}**")
-        col3.write(row['category'])
-        col4.write(row['description'] or '-')
-        col5.markdown(f"🗑️")  # Button in column
-        if st.button("🗑️", key=f"del_{row['id']}", use_container_width=True):
-            delete_expense(row['id'])
+        with col1: st.write(row['date'])
+        with col2: st.write(f"**₹{row['amount']:,.0f}**")
+        with col3: st.write(row['category'])
+        with col4: st.write(row['description'] or '-')
+        with col5:
+            if st.button("🗑️", key=f"del_{row['id']}"):
+                delete_expense(row['id'])
     
     # Charts
     col1, col2 = st.columns(2)
     with col1:
-        cat_sum = data.groupby('category')['amount'].sum()
-        if not cat_sum.empty:
-            fig, ax = plt.subplots(figsize=(6,6))
-            ax.pie(cat_sum.values, labels=cat_sum.index, autopct='%1.1f%%', startangle=90)
-            ax.axis('equal')
-            st.pyplot(fig)
+        if not data.empty:
+            cat_sum = data.groupby('category')['amount'].sum()
+            if len(cat_sum) > 0:
+                fig, ax = plt.subplots(figsize=(6,6))
+                ax.pie(cat_sum.values, labels=cat_sum.index, autopct='%1.1f%%', startangle=90)
+                ax.axis('equal')
+                st.pyplot(fig)
     
     with col2:
         total = data['amount'].sum()
         st.metric("💰 This Month", f"₹{total:,.0f}")
         st.metric("📊 Transactions", len(data))
 
+# ---------------- NEXT MONTH PREDICTION ----------------
 def budget_predict():
-    """✅ LOWER PREDICTION based on current month"""
+    st.subheader("📈 Next Month Prediction (Lower Estimate)")
     current_data = get_current_month_data()
+    
     if current_data.empty:
         st.warning("Add current month expenses first!")
         return
     
     current_total = current_data['amount'].sum()
-    days_in_month = date.today().day
-    avg_daily = current_total / days_in_month if days_in_month > 0 else 0
+    days_passed = date.today().day
+    avg_daily = current_total / days_passed if days_passed > 0 else 0
     
-    # ✅ LOWER PREDICTION LOGIC
-    # Current average * 28 days (lower than full 30)
-    remaining_days = 28 - days_in_month  
-    current_month_estimate = current_total + (avg_daily * remaining_days * 0.8)  # 80% spending rate
+    # ✅ LOWER PREDICTION: Conservative estimate
+    remaining_days = 28 - days_passed
+    current_month_total = current_total + (avg_daily * remaining_days * 0.8)
+    next_month_lower = current_month_total * 0.9  # 10% LOWER
     
     col1, col2 = st.columns(2)
     with col1:
         st.metric("💰 Spent So Far", f"₹{current_total:,.0f}")
-        st.metric("📅 Days Passed", days_in_month)
+        st.metric("📅 Days Passed", days_passed)
         st.metric("📊 Avg Daily", f"₹{avg_daily:,.0f}")
     
     with col2:
-        st.metric("📈 Current Month", f"₹{current_month_estimate:,.0f}")
-        # LOWER next month: 90% of current estimate
-        next_month_lower = current_month_estimate * 0.9  
-        st.success(f"🎯 **Next Month Prediction (Lower)**: ₹{next_month_lower:,.0f}")
-        st.info(f"💡 **Target Savings**: ₹{(current_month_estimate-next_month_lower):,.0f}")
+        st.metric("📈 Current Month", f"₹{current_month_total:,.0f}")
+        st.success(f"🎯 **Next Month (Lower)**: ₹{next_month_lower:,.0f}")
+        st.info(f"💡 **Save Goal**: ₹{(current_month_total-next_month_lower):,.0f}")
 
 # ---------------- MAIN ----------------
 if choice == "➕ Add Expense":
