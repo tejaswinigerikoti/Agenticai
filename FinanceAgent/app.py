@@ -61,11 +61,22 @@ with tab1:
     col1, col2 = st.columns(2)
     with col1:
         date = st.date_input("Date", datetime.now())
-        category = st.selectbox("Category", [
+        
+        # ✅ CUSTOM CATEGORY
+        category = st.selectbox("Category", ["➕ Custom"] + [
             "Food", "Travel", "Education", "Entertainment", 
             "Shopping", "Bills", "Gym", "Medical", "Fuel", 
-            "Rent", "Netflix", "Other"
+            "Rent", "Netflix"
         ])
+        
+        if category == "➕ Custom":
+            custom_category = st.text_input("✏️ Enter your category:", 
+                                          placeholder="Ex: Gifts, Petrol, Snacks")
+            final_category = custom_category if custom_category else "Other"
+        else:
+            final_category = category
+        
+        st.info(f"**Selected Category**: {final_category}")
     
     with col2:
         amount = st.number_input("Amount (₹)", min_value=1.0, step=10.0)
@@ -77,10 +88,10 @@ with tab1:
             cursor.execute(f"""
                 INSERT INTO {table_name} (date, amount, category, description)
                 VALUES (?, ?, ?, ?)
-            """, (str(date), amount, category, desc))
+            """, (str(date), amount, final_category, desc))
             conn.commit()
-            st.success("✅ **Expense Successfully Saved!** 🎉")
-            st.balloons()
+            st.success("✅ **Expense Successfully Saved!**")
+            # ✅ NO BALLOONS
         except Exception as e:
             st.error(f"Error: {e}")
 
@@ -104,6 +115,7 @@ with tab2:
         )
         
         # Delete buttons
+        st.subheader("🗑️ Delete Expense")
         for row in rows:
             col1, col2 = st.columns([4, 1])
             with col1:
@@ -112,7 +124,7 @@ with tab2:
                 if st.button("🗑️", key=f"del_{row[0]}"):
                     cursor.execute(f"DELETE FROM {table_name} WHERE id=?", (row[0],))
                     conn.commit()
-                    st.success("Deleted!")
+                    st.success("✅ Deleted!")
                     st.rerun()
         
         # Charts
@@ -142,4 +154,6 @@ with tab3:
         with col2:
             st.success(f"📈 Monthly Estimate: ₹{total*1.1:,.0f}")
 
-st.sidebar.button("🚪 Logout", on_click=lambda: st.session_state.clear())
+if st.sidebar.button("🚪 Logout"):
+    st.session_state.clear()
+    st.rerun()
