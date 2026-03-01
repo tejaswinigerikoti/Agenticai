@@ -30,7 +30,6 @@ st.title("💰 Personal Finance Manager")
 st.markdown("---")
 
 # ---------------- SIDEBAR (Only Menu) ----------------
-# ఇక్కడ కేవలం Menu మాత్రమే ఉంటుంది
 st.sidebar.title("📌 Navigation")
 menu = ["Add Expense", "View Expenses", "Budget Prediction"]
 choice = st.sidebar.selectbox("Menu", menu)
@@ -39,7 +38,7 @@ choice = st.sidebar.selectbox("Menu", menu)
 
 def add_expense():
     st.subheader("➕ Add Daily Expense")
-    cursor = conn.cursor() # ఎర్రర్ రాకుండా ఇక్కడ cursor ని డిఫైన్ చేశాను
+    cursor = conn.cursor() # Fixed NameError
     
     col1, col2 = st.columns(2)
     with col1:
@@ -53,24 +52,30 @@ def add_expense():
         cursor.execute("INSERT INTO expenses VALUES(?,?,?,?)", (str(date), amount, category, description))
         conn.commit()
         st.success("✅ Expense Added Successfully!")
-        st.balloons()
+        # st.balloons() - Removed as per your request
 
 def view_expenses():
     st.subheader("📋 Expense Records")
+    # Fetching data using connection
     data = pd.read_sql("SELECT * FROM expenses ORDER BY date DESC", conn)
     
     if not data.empty:
         st.dataframe(data, use_container_width=True)
         
-        category_sum = data.groupby('category')['amount'].sum().sort_values(ascending=False)
-        st.subheader("🏆 Category Wise Spending")
-        fig, ax = plt.subplots()
-        ax.pie(category_sum, labels=category_sum.index, autopct='%1.1f%%', startangle=90)
-        ax.axis('equal')
-        st.pyplot(fig)
+        col1, col2 = st.columns(2)
+        with col1:
+            category_sum = data.groupby('category')['amount'].sum().sort_values(ascending=False)
+            st.subheader("🏆 Category Wise Spending")
+            fig, ax = plt.subplots()
+            ax.pie(category_sum, labels=category_sum.index, autopct='%1.1f%%', startangle=90)
+            ax.axis('equal')
+            st.pyplot(fig)
         
-        total_spent = data['amount'].sum()
-        st.metric("💎 Total Spent", f"₹{total_spent:,.2f}")
+        with col2:
+            total_spent = data['amount'].sum()
+            avg_daily = data['amount'].mean()
+            st.metric("💎 Total Spent", f"₹{total_spent:,.2f}")
+            st.metric("📊 Avg Daily Spend", f"₹{avg_daily:.2f}")
     else:
         st.warning("📭 No expenses found. Add some expenses first!")
 
@@ -81,7 +86,9 @@ def budget_prediction():
     if not data.empty:
         total = data['amount'].sum()
         st.info(f"**Total Spending so far**: ₹{total:,.2f}")
-        st.success(f"**Predicted Next Month (Est.)**: ₹{total * 1.1:,.2f}")
+        # Simple prediction logic (10% growth)
+        predicted_next = total * 1.1
+        st.success(f"**Predicted Next Month (Estimated)**: ₹{predicted_next:,.2f}")
     else:
         st.warning("📊 Add expenses to see trends!")
 
