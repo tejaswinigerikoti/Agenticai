@@ -80,6 +80,19 @@ def get_current_month_data():
     data = pd.DataFrame(cursor.fetchall(), columns=['id', 'date', 'amount', 'category', 'description', 'is_deleted'])
     return data
 
+def get_previous_month_total():
+    today = date.today()
+    # Previous month (Feb 2026 if today is March 1)
+    prev_month = (today.replace(day=1) - date.timedelta(days=1)).strftime('%Y-%m')
+    
+    cursor = conn.cursor()
+    cursor.execute(f'''
+        SELECT COALESCE(SUM(amount), 0) as total 
+        FROM {user_table} 
+        WHERE date LIKE '{prev_month}%' AND is_deleted = 0
+    ''')
+    return cursor.fetchone()[0]
+
 def delete_expense(expense_id):
     cursor = conn.cursor()
     cursor.execute(f"UPDATE {user_table} SET is_deleted = 1 WHERE id = ?", (expense_id,))
@@ -139,16 +152,21 @@ def view_expenses():
         return
     
     # ✅ TABLE WITH HEADINGS
-    st.markdown("### 📋 Expenses")
-    st.markdown("**Date** | **Amount** | **Category** | **Description** | **Delete**")
-    st.markdown("-" * 60)
+    header_col1, header_col2, header_col3, header_col4, header_col5 = st.columns(5)
+    with header_col1: st.markdown("**Date**")
+    with header_col2: st.markdown("**Amount**")
+    with header_col3: st.markdown("**Category**")
+    with header_col4: st.markdown("**Description**")
+    with header_col5: st.markdown("**Delete**")
     
-    # Table rows
+    st.markdown("---")
+    
+    # Data rows
     for idx, row in data.iterrows():
         col1, col2, col3, col4, col5 = st.columns(5)
-        with col1: st.write(f"**{row['date']}**")
-        with col2: st.write(f"**₹{row['amount']:,.0f}**")
-        with col3: st.write(f"**{row['category']}**")
+        with col1: st.write(row['date'])
+        with col2: st.write(f"₹{row['amount']:,.0f}")
+        with col3: st.write(row['category'])
         with col4: st.write(row['description'] or '-')
         with col5: 
             if st.button("🗑️", key=f"del_{row['id']}"):
@@ -169,23 +187,24 @@ def view_expenses():
         st.metric("Count", len(data))
 
 def budget_predict():
-    data = get_current_month_data()
-    if data.empty:
+    current_data = get_current_month_data()
+    if current_data.empty:
         st.warning("No data!")
         return
     
-    total = data['amount'].sum()
-    days = date.today().day
-    daily = total / days if days > 0 else 0
+    # ✅ PREVIOUS MONTH BASED PREDICTION
+    prev_month_total = get_previous_month_total()
+    current_total = current_data['amount'].sum()
     
     col1, col2 = st.columns(2)
     with col1:
-        st.metric("Current", f"₹{total:,.0f}")
-        st.metric("Daily", f"₹{daily:,.0f}")
+        st.metric("Current Month", f"₹{current_total:,.0f}")
+        st.metric("Prev Month", f"₹{prev_month_total:,.0f}")
     
     with col2:
-        next_month = daily * 30 * 1.1
-        st.success(f"April: ₹{next_month:,.0f}")
+        # Prediction = Previous month × 1.05 (5% growth)
+        next_month_pred = prev_month_total * 1.05
+        st.success(f"**April Prediction**: ₹{next_month_pred:,.0f}")
 
 # ---------------- MAIN ----------------
 if choice == "➕ Add Expense":
@@ -196,4 +215,4 @@ elif choice == "📈 Budget":
     budget_predict()
 
 st.markdown("---")
-st.caption("🔒 Private | 📅 Current Month Only")
+st.caption("🔒 Private | 📅 Previous Month Prediction")
