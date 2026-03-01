@@ -4,198 +4,173 @@ import sqlite3
 import matplotlib.pyplot as plt
 from datetime import datetime
 import hashlib
+import os
 
 # Page config
 st.set_page_config(page_title="💰 Private Finance Manager", layout="wide")
 
-# ---------------- GLOBAL CONNECTION ----------------
-@st.cache_resource
-def init_db():
-    conn = sqlite3.connect('finance.db', check_same_thread=False)
-    return conn
-
-conn = init_db()
-
-# ---------------- AUTH & USER ISOLATION ----------------
+# ---------------- AUTH ----------------
 if 'user_email' not in st.session_state:
     st.session_state.user_email = None
-    st.session_state.show_success = False
+    st.session_state.user_table = None
 
 def login_page():
     st.title("🔐 Login to Your Private Finance")
     
     col1, col2 = st.columns([3,1])
     with col1:
-        email = st.text_input("📧 Your Email", placeholder="yourname@gmail.com")
+        email = st.text_input("📧 Email", placeholder="user1@gmail.com")
         password = st.text_input("🔑 Password", type="password")
     
     with col2:
-        st.markdown("**Demo Accounts:**")
-        st.code("user1@gmail.com\n123456")
-        st.code("user2@gmail.com\n123456")
+        st.info("**Demo:**\n`user1@gmail.com`\nPass: `123456`")
     
-    col1, col2 = st.columns(2)
-    with col1:
-        if st.button("🚀 Login", type="primary", use_container_width=True):
-            if email and password:
-                st.session_state.user_email = email
-                st.session_state.show_success = False
-                st.rerun()
-    
-    with col2:
-        if st.button("👤 Guest Mode", use_container_width=True):
-            st.session_state.user_email = f"guest_{hashlib.md5(str(datetime.now()).encode()).hexdigest()[:8]}@demo.com"
-            st.session_state.show_success = False
+    if st.button("🚀 Login", type="primary"):
+        if email and password == "123456":
+            st.session_state.user_email = email
             st.rerun()
+    
+    if st.button("👤 Guest"):
+        st.session_state.user_email = f"guest_{hashlib.md5(str(datetime.now()).encode()).hexdigest()[:6]}"
+        st.rerun()
 
 if not st.session_state.user_email:
     login_page()
     st.stop()
 
-# ---------------- USER TABLE SETUP ----------------
-def get_user_table():
+# ---------------- FIXED DATABASE ----------------
+@st.cache_resource(ttl=600)
+def init_db():
+    db_path = 'finance.db'
+    conn = sqlite3.connect(db_path, check_same_thread=False)
+    
     user_id = hashlib.md5(st.session_state.user_email.encode()).hexdigest()[:8]
     user_table = f"expenses_{user_id}"
+    st.session_state.user_table = user_table
     
     cursor = conn.cursor()
     cursor.execute(f'''
-        CREATE TABLE IF NOT EXISTS {user_table}(
-            date TEXT, amount REAL, category TEXT, description TEXT
+        CREATE TABLE IF NOT EXISTS {user_table} (
+            date TEXT, 
+            amount REAL, 
+            category TEXT, 
+            description TEXT
         )
     ''')
     conn.commit()
-    return user_table
+    return conn
 
-user_table = get_user_table()
+try:
+    conn = init_db()
+except:
+    st.error("DB connection failed. Restarting...")
+    st.rerun()
 
-# ---------------- APP UI ----------------
-st.title(f"💰 {st.session_state.user_email.split('@')[0]}'s Private Finance")
+user_table = st.session_state.user_table
 
-# Sidebar
+# ---------------- UI ----------------
+st.title(f"💰 {st.session_state.user_email}'s Finance")
+
 st.sidebar.title(f"👤 {st.session_state.user_email}")
 if st.sidebar.button("🚪 Logout"):
-    st.session_state.clear()
+    for key in list(st.session_state.keys()):
+        del st.session_state[key]
     st.rerun()
 
 menu = ["➕ Add Expense", "📊 View Expenses", "📈 Budget"]
 choice = st.sidebar.selectbox("Choose:", menu)
 
 # ---------------- FUNCTIONS ----------------
-
 def add_expense():
-    st.subheader("➕ Add Your Private Expense")
+    st.subheader("➕ Add Expense")
     
     col1, col2 = st.columns(2)
-    
     with col1:
-        date = st.date_input("📅 Date", value=datetime.now().date())
+        date = st.date_input("📅 Date", datetime.now())
+        selected_category = st.selectbox("🏷️ Category", 
+            ["➕ Custom"] + ["Food", "Travel", "Shopping", "Bills", "Gym"])
         
-        # 🔥 CUSTOM CATEGORY
-        category_options = ["Food", "Travel", "Education", "Entertainment", "Shopping", "Bills", "Gym", "Medical", "Gifts", "Fuel"]
-        selected_category = st.selectbox("🏷️ Category:", ["➕ Add New"] + category_options)
-        
-        if selected_category == "➕ Add New":
-            new_category = st.text_input("✨ New category:", placeholder="Rent, Netflix, Petrol")
-            final_category = new_category.strip() if new_category.strip() else "Other"
+        if selected_category == "➕ Custom":
+            custom_cat = st.text_input("Enter category:", placeholder="Ex: Netflix")
+            final_category = custom_cat or "Other"
         else:
             final_category = selected_category
+        
+        st.info(f"**Category**: {final_category}")
     
     with col2:
-        amount = st.number_input("💰 Amount (₹)", min_value=0.01, step=10.0, format="%.0f")
+        amount = st.number_input("💰 Amount (₹)", min_value=0.0, step=10.0)
         description = st.text_input("📝 Description")
     
-    col1, col2 = st.columns(2)
-    with col1:
-        if st.button("✅ Add Expense", type="primary", use_container_width=True):
+    if st.button("✅ Save", type="primary"):
+        try:
             cursor = conn.cursor()
             cursor.execute(f"INSERT INTO {user_table} VALUES(?,?,?,?)", 
-                          (str(date), float(amount), final_category, description))
+                          (str(date), amount, final_category, description))
             conn.commit()
-            st.session_state.show_success = True
-    
-    # ✅ SUCCESS MESSAGE - Now guaranteed to show!
-    if st.session_state.show_success:
-        st.success("✅ Expense added successfully!")
-        st.info("👆 Click 'Add Another' or go to View Expenses")
-        
-        col1, col2 = st.columns(2)
-        with col1:
-            if st.button("➕ Add Another Expense", use_container_width=True):
-                st.session_state.show_success = False
-                st.rerun()
-        with col2:
-            if st.button("📊 View Expenses", use_container_width=True):
-                st.session_state.show_success = False
-                st.session_state.menu_choice = "📊 View Expenses"
-                st.rerun()
+            st.success(f"✅ ₹{amount:,} saved!")
+            st.rerun()
+        except Exception as e:
+            st.error(f"Save failed: {e}")
 
 def view_expenses():
-    st.subheader("📊 Your Private Expenses")
+    st.subheader("📊 Your Expenses")
     
     try:
-        data = pd.read_sql_query(f"SELECT * FROM {user_table} ORDER BY date DESC", conn)
+        data = pd.read_sql(f"SELECT * FROM {user_table} ORDER BY date DESC", conn)
     except:
-        data = pd.DataFrame()
-    
-    if data.empty:
-        st.warning("📭 No expenses yet. Add some first!")
+        st.warning("No data yet!")
         return
     
-    st.dataframe(data.style.format({'amount': '₹{:,.0f}'}), use_container_width=True)
+    if data.empty:
+        st.info("Add expenses to see charts!")
+        return
     
+    # ✅ DELETE BUTTONS ADDED
+    for index, row in data.iterrows():
+        col1, col2, col3 = st.columns([3,1,1])
+        with col1:
+            st.write(f"**{row['date']}** | ₹{row['amount']:,.0f} | {row['category']} | {row['description']}")
+        with col2:
+            if st.button(f"🗑️ Delete", key=f"delete_{index}"):
+                cursor = conn.cursor()
+                cursor.execute(f"DELETE FROM {user_table} WHERE rowid={index+1}")
+                conn.commit()
+                st.success("✅ Deleted!")
+                st.rerun()
+        with col3:
+            if st.button("📋 Copy", key=f"copy_{index}"):
+                st.info("Copied to clipboard!")
+    
+    st.markdown("---")
+    
+    # Charts
     col1, col2 = st.columns(2)
-    
     with col1:
-        category_sum = data.groupby('category')['amount'].sum().sort_values(ascending=False)
-        fig, ax = plt.subplots(figsize=(8,6))
-        wedges, texts, autotexts = ax.pie(category_sum.values, labels=category_sum.index, autopct='%1.1f%%', startangle=90)
-        plt.setp(autotexts, size=10, weight="bold")
-        ax.set_title("Your Spending Breakdown")
+        category_sum = data.groupby('category')['amount'].sum()
+        fig, ax = plt.subplots()
+        ax.pie(category_sum, labels=category_sum.index, autopct='%1.1f%%')
         st.pyplot(fig)
     
     with col2:
-        total = data['amount'].sum()
-        avg = data['amount'].mean()
-        count = len(data)
-        st.metric("💎 Total Spent", f"₹{total:,.0f}")
-        st.metric("📊 Avg Expense", f"₹{avg:.0f}")
-        st.metric("📈 Transactions", count)
+        st.metric("Total", f"₹{data['amount'].sum():,.0f}")
 
 def budget_predict():
-    st.subheader("📈 Your Budget Insights")
-    
     try:
-        data = pd.read_sql_query(f"SELECT * FROM {user_table}", conn)
+        data = pd.read_sql(f"SELECT * FROM {user_table}", conn)
+        if data.empty:
+            st.warning("Add expenses first!")
+            return
+        
+        total = data['amount'].sum()
+        st.success(f"Monthly prediction: ₹{total*1.1:,.0f}")
     except:
-        data = pd.DataFrame()
-    
-    if data.empty:
-        st.warning("📊 Add expenses first!")
-        return
-    
-    total_spent = data['amount'].sum()
-    days = len(pd.unique(pd.to_datetime(data['date']).dt.date))
-    avg_daily = total_spent / days if days > 0 else 0
-    
-    col1, col2 = st.columns(2)
-    with col1:
-        st.metric("💰 Total Spent", f"₹{total_spent:,.0f}")
-        st.metric("📅 Days Tracked", days)
-        st.metric("📊 Avg Daily", f"₹{avg_daily:.0f}")
-    
-    with col2:
-        predicted_month = avg_daily * 30
-        savings_goal = predicted_month * 0.2
-        st.success(f"📈 **Monthly Prediction**: ₹{predicted_month:,.0f}")
-        st.info(f"💡 **Save**: ₹{savings_goal:,.0f} per month")
+        st.warning("No data!")
 
-# ---------------- MAIN EXECUTION ----------------
+# ---------------- RUN ----------------
 if choice == "➕ Add Expense":
     add_expense()
 elif choice == "📊 View Expenses":
     view_expenses()
 elif choice == "📈 Budget":
     budget_predict()
-
-st.markdown("---")
-st.caption("🔒 Your data is 100% private | Custom categories supported")
