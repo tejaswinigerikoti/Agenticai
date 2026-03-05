@@ -1,6 +1,5 @@
 import streamlit as st
 import sqlite3
-import matplotlib.pyplot as plt
 import pandas as pd
 from datetime import date
 import hashlib
@@ -11,8 +10,8 @@ st.set_page_config(page_title="Expense Tracker", layout="wide")
 LOGIN_FILE = "login.txt"
 DB_FILE = "expenses.db"
 
-# ---------- LOGIN SESSION ----------
-if 'user_email' not in st.session_state:
+# ---------------- SESSION LOGIN ----------------
+if "user_email" not in st.session_state:
     if os.path.exists(LOGIN_FILE):
         with open(LOGIN_FILE, "r") as f:
             st.session_state.user_email = f.read().strip()
@@ -20,7 +19,7 @@ if 'user_email' not in st.session_state:
         st.session_state.user_email = None
 
 
-# ---------- LOGIN PAGE ----------
+# ---------------- LOGIN PAGE ----------------
 def login_page():
     st.title("🔐 Expense Tracker Login")
 
@@ -45,14 +44,15 @@ if not st.session_state.user_email:
     login_page()
     st.stop()
 
-# ---------- DATABASE ----------
+
+# ---------------- DATABASE ----------------
 conn = sqlite3.connect(DB_FILE, check_same_thread=False)
 cursor = conn.cursor()
 
 user_id = hashlib.md5(st.session_state.user_email.encode()).hexdigest()[:8]
 user_table = f"expenses_{user_id}"
 
-cursor.execute(f'''
+cursor.execute(f"""
 CREATE TABLE IF NOT EXISTS {user_table}(
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     date TEXT,
@@ -60,11 +60,12 @@ CREATE TABLE IF NOT EXISTS {user_table}(
     category TEXT,
     description TEXT
 )
-''')
+""")
 
 conn.commit()
 
-# ---------- SIDEBAR ----------
+
+# ---------------- SIDEBAR ----------------
 st.sidebar.title("Menu")
 
 if st.sidebar.button("Logout"):
@@ -78,8 +79,8 @@ menu = st.sidebar.selectbox(
     ["Add Expense", "View Expenses"]
 )
 
-# ---------- TITLE ----------
 st.title(f"💰 {st.session_state.user_email.split('@')[0]}'s Expense Tracker")
+
 
 # ====================================================
 # ADD EXPENSE
@@ -103,7 +104,6 @@ if menu == "Add Expense":
 
     with col2:
         amount = st.number_input("Amount ₹", min_value=1.0, step=10.0)
-
         description = st.text_input("Description")
 
     if st.button("Save Expense"):
@@ -115,10 +115,11 @@ if menu == "Add Expense":
 
         conn.commit()
 
-        st.success("Expense Added")
+        st.success("Expense Added Successfully")
+
 
 # ====================================================
-# VIEW EXPENSE
+# VIEW EXPENSES
 # ====================================================
 
 if menu == "View Expenses":
@@ -129,7 +130,7 @@ if menu == "View Expenses":
     data = cursor.fetchall()
 
     if not data:
-        st.info("No expenses added")
+        st.info("No expenses added yet")
         st.stop()
 
     df = pd.DataFrame(data, columns=["ID","Date","Amount","Category","Description"])
@@ -138,8 +139,8 @@ if menu == "View Expenses":
     total = df["Amount"].sum()
     st.metric("Total Spent", f"₹{total:,.0f}")
 
-    # ---------- TABLE ----------
-    st.subheader("Expense List")
+    # ---------- EXPENSE TABLE ----------
+    st.subheader("📋 Expense List")
 
     for i,row in df.iterrows():
 
@@ -150,7 +151,7 @@ if menu == "View Expenses":
         c3.write(row["Category"])
         c4.write(row["Description"])
 
-        if c5.button("🗑", key=row["ID"]):
+        if c5.button("🗑 Delete", key=row["ID"]):
             cursor.execute(
                 f"DELETE FROM {user_table} WHERE id=?",
                 (row["ID"],)
@@ -158,81 +159,66 @@ if menu == "View Expenses":
             conn.commit()
             st.rerun()
 
-    # ====================================================
-    # CATEGORY PIE CHART
-    # ====================================================
-
-    st.subheader("📈 Category Breakdown")
-
-    pie = df.groupby("Category")["Amount"].sum()
-
-    fig, ax = plt.subplots()
-    ax.pie(pie, labels=pie.index, autopct='%1.1f%%')
-    ax.set_title("Category Expenses")
-
-    st.pyplot(fig)
 
     # ====================================================
-    # MONTHLY REPORT
+    # CATEGORY SUMMARY TABLE
     # ====================================================
 
-    st.subheader("📅 Monthly Report")
+    st.subheader("🏷 Category Summary")
+
+    category_summary = df.groupby("Category")["Amount"].sum().reset_index()
+    category_summary["Amount"] = category_summary["Amount"].apply(lambda x: f"₹{x:,.0f}")
+
+    st.dataframe(category_summary, use_container_width=True)
+
+
+    # ====================================================
+    # MONTHLY REPORT TABLE
+    # ====================================================
+
+    st.subheader("📅 Monthly Expense Report")
 
     cursor.execute(f"""
-    SELECT strftime('%Y-%m', date) as month, SUM(amount)
+    SELECT strftime('%Y-%m', date) AS Month, SUM(amount)
     FROM {user_table}
-    GROUP BY month
-    ORDER BY month
+    GROUP BY Month
+    ORDER BY Month DESC
     """)
 
     month_data = cursor.fetchall()
 
     if month_data:
 
-        df_month = pd.DataFrame(month_data, columns=["Month","Total"])
+        df_month = pd.DataFrame(month_data, columns=["Month","Total Spent"])
 
-        st.table(df_month)
+        df_month["Total Spent"] = df_month["Total Spent"].apply(lambda x: f"₹{x:,.0f}")
 
-        fig2, ax2 = plt.subplots()
+        st.dataframe(df_month, use_container_width=True)
 
-        ax2.bar(df_month["Month"], df_month["Total"])
-
-        ax2.set_xlabel("Month")
-        ax2.set_ylabel("Amount ₹")
-        ax2.set_title("Monthly Expenses")
-
-        st.pyplot(fig2)
 
     # ====================================================
-    # YEARLY REPORT
+    # YEARLY REPORT TABLE
     # ====================================================
 
-    st.subheader("📆 Yearly Report")
+    st.subheader("📆 Yearly Expense Report")
 
     cursor.execute(f"""
-    SELECT strftime('%Y', date) as year, SUM(amount)
+    SELECT strftime('%Y', date) AS Year, SUM(amount)
     FROM {user_table}
-    GROUP BY year
-    ORDER BY year
+    GROUP BY Year
+    ORDER BY Year DESC
     """)
 
     year_data = cursor.fetchall()
 
     if year_data:
 
-        df_year = pd.DataFrame(year_data, columns=["Year","Total"])
+        df_year = pd.DataFrame(year_data, columns=["Year","Total Spent"])
 
-        st.table(df_year)
+        df_year["Total Spent"] = df_year["Total Spent"].apply(lambda x: f"₹{x:,.0f}")
 
-        fig3, ax3 = plt.subplots()
+        st.dataframe(df_year, use_container_width=True)
 
-        ax3.bar(df_year["Year"], df_year["Total"])
-
-        ax3.set_xlabel("Year")
-        ax3.set_ylabel("Amount ₹")
-        ax3.set_title("Yearly Expenses")
-
-        st.pyplot(fig3)
 
 st.markdown("---")
-st.caption("Personal Expense Tracker")
+st.caption("💰 Personal Expense Tracker (Streamlit + SQLite)")
