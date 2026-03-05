@@ -10,34 +10,40 @@ st.set_page_config(page_title="Expense Tracker", layout="wide")
 LOGIN_FILE = "login.txt"
 DB_FILE = "expenses.db"
 
-# ---------- SESSION ----------
+# ---------------- SESSION ----------------
+
 if "user_email" not in st.session_state:
     if os.path.exists(LOGIN_FILE):
-        with open(LOGIN_FILE, "r") as f:
+        with open(LOGIN_FILE,"r") as f:
             st.session_state.user_email = f.read().strip()
     else:
         st.session_state.user_email = None
 
 
-# ---------- LOGIN ----------
+# ---------------- LOGIN PAGE ----------------
+
 def login_page():
+
     st.title("🔐 Expense Tracker Login")
 
     email = st.text_input("Email")
-    password = st.text_input("Password", type="password")
+    password = st.text_input("Password",type="password")
 
     st.info("Demo Login\nEmail: user@gmail.com\nPassword: 123456")
 
     if st.button("Login"):
-        if email and password == "123456":
+
+        if email and password=="123456":
+
             st.session_state.user_email = email
 
-            with open(LOGIN_FILE, "w") as f:
+            with open(LOGIN_FILE,"w") as f:
                 f.write(email)
 
             st.rerun()
+
         else:
-            st.error("Invalid login")
+            st.error("Invalid Login")
 
 
 if not st.session_state.user_email:
@@ -45,8 +51,9 @@ if not st.session_state.user_email:
     st.stop()
 
 
-# ---------- DATABASE ----------
-conn = sqlite3.connect(DB_FILE, check_same_thread=False)
+# ---------------- DATABASE ----------------
+
+conn = sqlite3.connect(DB_FILE,check_same_thread=False)
 cursor = conn.cursor()
 
 user_id = hashlib.md5(st.session_state.user_email.encode()).hexdigest()[:8]
@@ -65,21 +72,94 @@ description TEXT
 conn.commit()
 
 
-# ---------- SIDEBAR ----------
+# ---------------- SIDEBAR ----------------
+
 st.sidebar.title("Menu")
 
 if st.sidebar.button("Logout"):
+
     st.session_state.clear()
+
     if os.path.exists(LOGIN_FILE):
         os.remove(LOGIN_FILE)
+
     st.rerun()
+
 
 menu = st.sidebar.selectbox(
 "Choose",
-["Add Expense","Reports"]
+["Dashboard","Add Expense","Reports"]
 )
 
 st.title(f"💰 {st.session_state.user_email.split('@')[0]}'s Expense Tracker")
+
+
+# =====================================================
+# DASHBOARD
+# =====================================================
+
+if menu == "Dashboard":
+
+    st.subheader("📊 Dashboard")
+
+    cursor.execute(f"SELECT SUM(amount) FROM {user_table}")
+    total_spent = cursor.fetchone()[0] or 0
+
+    cursor.execute(f"""
+    SELECT SUM(amount)
+    FROM {user_table}
+    WHERE strftime('%Y-%m',date)=strftime('%Y-%m','now')
+    """)
+    month_spent = cursor.fetchone()[0] or 0
+
+    cursor.execute(f"""
+    SELECT SUM(amount)
+    FROM {user_table}
+    WHERE date=date('now')
+    """)
+    today_spent = cursor.fetchone()[0] or 0
+
+    cursor.execute(f"""
+    SELECT category,SUM(amount) as total
+    FROM {user_table}
+    GROUP BY category
+    ORDER BY total DESC
+    LIMIT 1
+    """)
+    top_cat = cursor.fetchone()
+
+    if top_cat:
+        top_category = top_cat[0]
+    else:
+        top_category = "-"
+
+    c1,c2,c3,c4 = st.columns(4)
+
+    c1.metric("💰 Total Spent",f"₹{total_spent:,.0f}")
+    c2.metric("📅 This Month",f"₹{month_spent:,.0f}")
+    c3.metric("📆 Today",f"₹{today_spent:,.0f}")
+    c4.metric("🏆 Top Category",top_category)
+
+
+    st.subheader("🏷 Category Wise Spending")
+
+    cursor.execute(f"""
+    SELECT category,SUM(amount)
+    FROM {user_table}
+    GROUP BY category
+    ORDER BY SUM(amount) DESC
+    """)
+
+    cat_data = cursor.fetchall()
+
+    if cat_data:
+
+        df_cat = pd.DataFrame(cat_data,columns=["Category","Total"])
+
+        df_cat["Total"] = df_cat["Total"].apply(lambda x:f"₹{x:,.0f}")
+
+        st.dataframe(df_cat,use_container_width=True)
+
 
 # =====================================================
 # ADD EXPENSE
@@ -141,6 +221,7 @@ if menu == "Reports":
 
     st.metric("Total Spent",f"₹{total:,.0f}")
 
+
 # =====================================================
 # MONTHLY REPORT
 # =====================================================
@@ -162,12 +243,11 @@ if menu == "Reports":
 
     st.dataframe(df_month,use_container_width=True)
 
-# Month select
     month_list = [row[0] for row in month_data]
 
     selected_month = st.selectbox("Select Month",month_list)
 
-# Show month expenses
+
     cursor.execute(f"""
     SELECT id,date,amount,category,description
     FROM {user_table}
@@ -179,34 +259,28 @@ if menu == "Reports":
 
     if month_rows:
 
-        df_month_exp = pd.DataFrame(
-        month_rows,
-        columns=["ID","Date","Amount","Category","Description"]
-        )
-
-        df_month_exp["Amount"] = df_month_exp["Amount"].apply(lambda x:f"₹{x:,.0f}")
-
         st.subheader(f"📋 Expenses in {selected_month}")
 
-        for i,row in df_month_exp.iterrows():
+        for row in month_rows:
 
             c1,c2,c3,c4,c5 = st.columns([2,1,2,3,1])
 
-            c1.write(row["Date"])
-            c2.write(row["Amount"])
-            c3.write(row["Category"])
-            c4.write(row["Description"])
+            c1.write(row[1])
+            c2.write(f"₹{row[2]:,.0f}")
+            c3.write(row[3])
+            c4.write(row[4])
 
-            if c5.button("Delete",key=row["ID"]):
+            if c5.button("Delete",key=row[0]):
 
                 cursor.execute(
                 f"DELETE FROM {user_table} WHERE id=?",
-                (row["ID"],)
+                (row[0],)
                 )
 
                 conn.commit()
 
                 st.rerun()
+
 
 # =====================================================
 # DATE FILTER
@@ -238,6 +312,7 @@ if menu == "Reports":
     else:
 
         st.info("No expenses on this day")
+
 
 # =====================================================
 # YEARLY REPORT
