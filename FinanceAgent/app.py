@@ -124,52 +124,72 @@ if menu == "Add Expense":
 
 if menu == "View Expenses":
 
-    st.subheader("📊 All Expenses")
+    st.subheader("🔎 Search Expenses")
 
-    cursor.execute(f"SELECT * FROM {user_table} ORDER BY date DESC")
-    data = cursor.fetchall()
+    col1, col2 = st.columns(2)
 
-    if not data:
-        st.info("No expenses added yet")
-        st.stop()
+    with col1:
+        selected_month = st.selectbox(
+            "Select Month",
+            ["01","02","03","04","05","06","07","08","09","10","11","12"]
+        )
 
-    df = pd.DataFrame(data, columns=["ID","Date","Amount","Category","Description"])
+    with col2:
+        selected_date = st.date_input("Select Date")
 
-    # ---------- TOTAL ----------
-    total = df["Amount"].sum()
-    st.metric("Total Spent", f"₹{total:,.0f}")
+    # -------- MONTH FILTER --------
 
-    # ---------- EXPENSE TABLE ----------
-    st.subheader("📋 Expense List")
+    cursor.execute(f"""
+    SELECT date, amount, category, description
+    FROM {user_table}
+    WHERE strftime('%m', date) = ?
+    ORDER BY date DESC
+    """, (selected_month,))
 
-    for i,row in df.iterrows():
+    month_rows = cursor.fetchall()
 
-        c1,c2,c3,c4,c5 = st.columns([2,1,2,3,1])
+    if month_rows:
 
-        c1.write(row["Date"])
-        c2.write(f"₹{row['Amount']}")
-        c3.write(row["Category"])
-        c4.write(row["Description"])
+        df_month = pd.DataFrame(
+            month_rows,
+            columns=["Date","Amount","Category","Description"]
+        )
 
-        if c5.button("🗑 Delete", key=row["ID"]):
-            cursor.execute(
-                f"DELETE FROM {user_table} WHERE id=?",
-                (row["ID"],)
-            )
-            conn.commit()
-            st.rerun()
+        df_month["Amount"] = df_month["Amount"].apply(lambda x: f"₹{x:,.0f}")
+
+        st.subheader("📅 Selected Month Expenses")
+
+        st.dataframe(df_month, use_container_width=True)
+
+    else:
+        st.info("No expenses in this month")
 
 
-    # ====================================================
-    # CATEGORY SUMMARY TABLE
-    # ====================================================
+    # -------- DATE FILTER --------
 
-    st.subheader("🏷 Category Summary")
+    cursor.execute(f"""
+    SELECT date, amount, category, description
+    FROM {user_table}
+    WHERE date = ?
+    """, (str(selected_date),))
 
-    category_summary = df.groupby("Category")["Amount"].sum().reset_index()
-    category_summary["Amount"] = category_summary["Amount"].apply(lambda x: f"₹{x:,.0f}")
+    day_rows = cursor.fetchall()
 
-    st.dataframe(category_summary, use_container_width=True)
+    if day_rows:
+
+        df_day = pd.DataFrame(
+            day_rows,
+            columns=["Date","Amount","Category","Description"]
+        )
+
+        df_day["Amount"] = df_day["Amount"].apply(lambda x: f"₹{x:,.0f}")
+
+        st.subheader("📆 Selected Day Expenses")
+
+        st.dataframe(df_day, use_container_width=True)
+
+    else:
+        st.info("No expenses on this day")
 
 
     # ====================================================
@@ -189,11 +209,16 @@ if menu == "View Expenses":
 
     if month_data:
 
-        df_month = pd.DataFrame(month_data, columns=["Month","Total Spent"])
+        df_month_report = pd.DataFrame(
+            month_data,
+            columns=["Month","Total Spent"]
+        )
 
-        df_month["Total Spent"] = df_month["Total Spent"].apply(lambda x: f"₹{x:,.0f}")
+        df_month_report["Total Spent"] = df_month_report["Total Spent"].apply(
+            lambda x: f"₹{x:,.0f}"
+        )
 
-        st.dataframe(df_month, use_container_width=True)
+        st.dataframe(df_month_report, use_container_width=True)
 
 
     # ====================================================
@@ -213,9 +238,14 @@ if menu == "View Expenses":
 
     if year_data:
 
-        df_year = pd.DataFrame(year_data, columns=["Year","Total Spent"])
+        df_year = pd.DataFrame(
+            year_data,
+            columns=["Year","Total Spent"]
+        )
 
-        df_year["Total Spent"] = df_year["Total Spent"].apply(lambda x: f"₹{x:,.0f}")
+        df_year["Total Spent"] = df_year["Total Spent"].apply(
+            lambda x: f"₹{x:,.0f}"
+        )
 
         st.dataframe(df_year, use_container_width=True)
 
