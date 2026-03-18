@@ -5,7 +5,7 @@ from datetime import date
 import hashlib
 import os
 
-st.set_page_config(page_title="Expense Tracker", layout="wide")
+st.set_page_config(page_title="Smart AI Expense Tracker", layout="wide")
 
 LOGIN_FILE = "login.txt"
 DB_FILE = "expenses.db"
@@ -18,32 +18,26 @@ if "user_email" not in st.session_state:
     else:
         st.session_state.user_email = None
 
-
 # ---------------- LOGIN ----------------
 def login_page():
-    st.title("🔐 Expense Tracker Login")
+    st.title("🔐 Smart AI Expense Tracker")
+    st.caption("AI Powered Financial Assistant 💡")
 
     email = st.text_input("Email")
     password = st.text_input("Password", type="password")
 
-    st.info("Demo Login\nEmail: user@gmail.com\nPassword: 123456")
-
     if st.button("Login"):
         if email and password == "123456":
             st.session_state.user_email = email
-
             with open(LOGIN_FILE,"w") as f:
                 f.write(email)
-
             st.rerun()
         else:
             st.error("Invalid Login")
 
-
 if not st.session_state.user_email:
     login_page()
     st.stop()
-
 
 # ---------------- DATABASE ----------------
 conn = sqlite3.connect(DB_FILE,check_same_thread=False)
@@ -63,7 +57,6 @@ description TEXT
 """)
 conn.commit()
 
-
 # ---------------- SIDEBAR ----------------
 st.sidebar.title("Menu")
 
@@ -75,11 +68,10 @@ if st.sidebar.button("Logout"):
 
 menu = st.sidebar.selectbox(
 "Choose",
-["Dashboard","Add Expense","Reports"]
+["Dashboard","Add Expense","Reports","Insights"]
 )
 
-st.title(f"💰 {st.session_state.user_email.split('@')[0]}'s Expense Tracker")
-
+st.title(f"💰 Smart AI Expense Tracker - {st.session_state.user_email}")
 
 # =====================================================
 # DASHBOARD
@@ -98,48 +90,32 @@ if menu == "Dashboard":
     """)
     month_spent = cursor.fetchone()[0] or 0
 
-    cursor.execute(f"""
-    SELECT SUM(amount)
-    FROM {user_table}
-    WHERE date=date('now')
-    """)
-    today_spent = cursor.fetchone()[0] or 0
+    # Budget
+    budget = st.number_input("Set Monthly Budget ₹",min_value=100.0,step=500.0)
 
-    cursor.execute(f"""
-    SELECT category,SUM(amount)
-    FROM {user_table}
-    GROUP BY category
-    ORDER BY SUM(amount) DESC
-    LIMIT 1
-    """)
-    top_cat = cursor.fetchone()
+    if budget > 0:
+        percent = (month_spent / budget) * 100
+        progress = min(month_spent / budget, 1.0)
 
-    top_category = top_cat[0] if top_cat else "-"
+        st.progress(progress)
+        st.write(f"Budget Used: {percent:.1f}%")
 
-    c1,c2,c3,c4 = st.columns(4)
+        if percent >= 100:
+            st.error("❌ Budget Exceeded!")
+        elif percent >= 80:
+            st.warning("⚠️ 80% budget used")
+        elif percent >= 50:
+            st.info("ℹ️ 50% budget used")
 
-    c1.metric("💰 Total Spent",f"₹{total_spent:,.0f}")
-    c2.metric("📅 This Month",f"₹{month_spent:,.0f}")
-    c3.metric("📆 Today",f"₹{today_spent:,.0f}")
-    c4.metric("🏆 Top Category",top_category)
+    # Smart highlight
+    if month_spent > 10000:
+        st.error("🚨 High spending this month!")
+    elif month_spent < 3000:
+        st.success("🎉 Great savings this month!")
 
-
-    st.subheader("🏷 Category Wise Spending")
-
-    cursor.execute(f"""
-    SELECT category,SUM(amount)
-    FROM {user_table}
-    GROUP BY category
-    ORDER BY SUM(amount) DESC
-    """)
-
-    cat_data = cursor.fetchall()
-
-    if cat_data:
-        df_cat = pd.DataFrame(cat_data,columns=["Category","Total"])
-        df_cat["Total"] = df_cat["Total"].apply(lambda x:f"₹{x:,.0f}")
-        st.dataframe(df_cat,use_container_width=True)
-
+    c1,c2 = st.columns(2)
+    c1.metric("Total Spent",f"₹{total_spent:,.0f}")
+    c2.metric("This Month",f"₹{month_spent:,.0f}")
 
 # =====================================================
 # ADD EXPENSE
@@ -163,8 +139,18 @@ if menu == "Add Expense":
         final_category = custom.strip() if custom.strip() else category
 
     with col2:
-        amount = st.number_input("Amount ₹",min_value=1.0,step=10.0)
+        amount = st.number_input("Amount ₹",min_value=1.0)
         description = st.text_input("Description")
+
+    # Auto category
+    if description:
+        desc = description.lower()
+        if "uber" in desc or "bus" in desc:
+            final_category = "Transport"
+        elif "pizza" in desc or "food" in desc:
+            final_category = "Food"
+        elif "amazon" in desc:
+            final_category = "Shopping"
 
     if st.button("Save Expense"):
         cursor.execute(
@@ -173,7 +159,6 @@ if menu == "Add Expense":
         )
         conn.commit()
         st.success("Expense Added ✅")
-
 
 # =====================================================
 # REPORTS
@@ -184,97 +169,84 @@ if menu == "Reports":
     data = cursor.fetchall()
 
     if not data:
-        st.info("No expenses added yet")
+        st.info("No data")
         st.stop()
 
     df = pd.DataFrame(data,columns=["ID","Date","Amount","Category","Description"])
-    total = df["Amount"].sum()
 
-    st.metric("Total Spent",f"₹{total:,.0f}")
+    st.dataframe(df,use_container_width=True)
 
+    st.download_button(
+        "📥 Download Report",
+        df.to_csv(index=False),
+        "expenses.csv",
+        "text/csv"
+    )
 
-# ---------------- MONTHLY ----------------
-    st.subheader("📅 Monthly Expense Report")
+# =====================================================
+# INSIGHTS
+# =====================================================
+if menu == "Insights":
+
+    st.subheader("🧠 Smart Insights")
 
     cursor.execute(f"""
-    SELECT strftime('%Y-%m',date) as Month,SUM(amount)
+    SELECT category,SUM(amount)
     FROM {user_table}
-    GROUP BY Month
-    ORDER BY Month DESC
+    GROUP BY category
     """)
+    data = cursor.fetchall()
 
-    month_data = cursor.fetchall()
+    if data:
+        df = pd.DataFrame(data,columns=["Category","Total"])
+        total = df["Total"].sum()
 
-    df_month = pd.DataFrame(month_data,columns=["Month","Total"])
-    df_month["Total"] = df_month["Total"].apply(lambda x:f"₹{x:,.0f}")
-    st.dataframe(df_month,use_container_width=True)
+        for _,row in df.iterrows():
+            percent = (row["Total"]/total)*100
 
-    month_list = [row[0] for row in month_data]
-    selected_month = st.selectbox("Select Month",month_list)
+            st.write(f"👉 {row['Category']} takes {percent:.1f}%")
+
+            if percent > 40:
+                st.warning(f"⚠️ High spending on {row['Category']}")
+            elif percent < 10:
+                st.success(f"✅ Good control on {row['Category']}")
+
+        if total > 5000:
+            st.info("💡 Tip: Reduce unnecessary spending to save more!")
+
+    # Daily pattern
+    st.subheader("📅 Daily Spending Pattern")
 
     cursor.execute(f"""
-    SELECT id,date,amount,category,description
+    SELECT date,SUM(amount)
     FROM {user_table}
-    WHERE strftime('%Y-%m',date)=?
+    GROUP BY date
     ORDER BY date DESC
-    """,(selected_month,))
-
-    month_rows = cursor.fetchall()
-
-    if month_rows:
-        st.subheader(f"📋 Expenses in {selected_month}")
-
-        for row in month_rows:
-            c1,c2,c3,c4,c5 = st.columns([2,1,2,3,1])
-
-            c1.write(row[1])
-            c2.write(f"₹{row[2]:,.0f}")
-            c3.write(row[3])
-            c4.write(row[4])
-
-            if c5.button("Delete",key=row[0]):
-                cursor.execute(f"DELETE FROM {user_table} WHERE id=?",(row[0],))
-                conn.commit()
-                st.rerun()
-
-
-# ---------------- DATE FILTER ----------------
-    st.subheader("📆 Search by Date")
-
-    selected_date = st.date_input("Select Date")
-
-    cursor.execute(f"""
-    SELECT date,amount,category,description
-    FROM {user_table}
-    WHERE date=?
-    """,(str(selected_date),))
-
-    day_rows = cursor.fetchall()
-
-    if day_rows:
-        df_day = pd.DataFrame(day_rows,columns=["Date","Amount","Category","Description"])
-        df_day["Amount"] = df_day["Amount"].apply(lambda x:f"₹{x:,.0f}")
-        st.dataframe(df_day,use_container_width=True)
-    else:
-        st.info("No expenses on this day")
-
-
-# ---------------- YEARLY ----------------
-    st.subheader("📆 Yearly Expense Report")
-
-    cursor.execute(f"""
-    SELECT strftime('%Y',date) as Year,SUM(amount)
-    FROM {user_table}
-    GROUP BY Year
-    ORDER BY Year DESC
+    LIMIT 5
     """)
 
-    year_data = cursor.fetchall()
+    data = cursor.fetchall()
 
-    df_year = pd.DataFrame(year_data,columns=["Year","Total"])
-    df_year["Total"] = df_year["Total"].apply(lambda x:f"₹{x:,.0f}")
-    st.dataframe(df_year,use_container_width=True)
+    if data:
+        df = pd.DataFrame(data,columns=["Date","Total"])
+        st.table(df)
 
+    # Prediction
+    st.subheader("📈 Prediction")
+
+    cursor.execute(f"""
+    SELECT strftime('%Y-%m',date),SUM(amount)
+    FROM {user_table}
+    GROUP BY 1
+    ORDER BY 1 DESC
+    LIMIT 3
+    """)
+
+    last3 = cursor.fetchall()
+
+    if len(last3) >= 3:
+        avg = sum([x[1] for x in last3]) / 3
+        st.success(f"Estimated next month spend: ₹{avg:,.0f}")
 
 st.markdown("---")
-st.caption("💰 Professional Expense Tracker (Streamlit + SQLite)")
+st.caption("🏆 Hackathon Ready Project - Smart AI Expense Tracker")
