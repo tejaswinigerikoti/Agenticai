@@ -4,6 +4,7 @@ import pandas as pd
 from datetime import date
 import hashlib
 import os
+import io
 
 st.set_page_config(page_title="Smart AI Expense Tracker", layout="wide")
 
@@ -46,6 +47,7 @@ cursor = conn.cursor()
 user_id = hashlib.md5(st.session_state.user_email.encode()).hexdigest()[:8]
 user_table = f"expenses_{user_id}"
 
+# Expense table
 cursor.execute(f"""
 CREATE TABLE IF NOT EXISTS {user_table}(
 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -55,6 +57,15 @@ category TEXT,
 description TEXT
 )
 """)
+
+# Budget table
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS user_budget(
+user TEXT PRIMARY KEY,
+budget REAL
+)
+""")
+
 conn.commit()
 
 # ---------------- SIDEBAR ----------------
@@ -90,8 +101,19 @@ if menu == "Dashboard":
     """)
     month_spent = cursor.fetchone()[0] or 0
 
-    # Budget
-    budget = st.number_input("Set Monthly Budget ₹",min_value=100.0,step=500.0)
+    # Load saved budget
+    cursor.execute("SELECT budget FROM user_budget WHERE user=?",(user_id,))
+    result = cursor.fetchone()
+    budget = result[0] if result else 0
+
+    # Set budget
+    new_budget = st.number_input("Set Monthly Budget ₹",min_value=100.0,step=500.0)
+
+    if st.button("Save Budget"):
+        cursor.execute("REPLACE INTO user_budget(user,budget) VALUES(?,?)",(user_id,new_budget))
+        conn.commit()
+        st.success("Budget Saved ✅")
+        st.rerun()
 
     if budget > 0:
         percent = (month_spent / budget) * 100
@@ -106,12 +128,6 @@ if menu == "Dashboard":
             st.warning("⚠️ 80% budget used")
         elif percent >= 50:
             st.info("ℹ️ 50% budget used")
-
-    # Smart highlight
-    if month_spent > 10000:
-        st.error("🚨 High spending this month!")
-    elif month_spent < 3000:
-        st.success("🎉 Great savings this month!")
 
     c1,c2 = st.columns(2)
     c1.metric("Total Spent",f"₹{total_spent:,.0f}")
@@ -176,12 +192,36 @@ if menu == "Reports":
 
     st.dataframe(df,use_container_width=True)
 
+    # Excel download
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+        df.to_excel(writer,index=False,sheet_name='Expenses')
+
     st.download_button(
-        "📥 Download Report",
-        df.to_csv(index=False),
-        "expenses.csv",
-        "text/csv"
+        "📥 Download Excel",
+        data=output.getvalue(),
+        file_name="expenses.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
+
+    # Date filter
+    st.subheader("📅 Search by Date")
+
+    selected_date = st.date_input("Select Date")
+
+    cursor.execute(f"""
+    SELECT date,amount,category,description
+    FROM {user_table}
+    WHERE date=?
+    """,(str(selected_date),))
+
+    rows = cursor.fetchall()
+
+    if rows:
+        df_day = pd.DataFrame(rows,columns=["Date","Amount","Category","Description"])
+        st.dataframe(df_day,use_container_width=True)
+    else:
+        st.info("No expenses on this date")
 
 # =====================================================
 # INSIGHTS
@@ -211,27 +251,6 @@ if menu == "Insights":
             elif percent < 10:
                 st.success(f"✅ Good control on {row['Category']}")
 
-        if total > 5000:
-            st.info("💡 Tip: Reduce unnecessary spending to save more!")
-
-    # Daily pattern
-    st.subheader("📅 Daily Spending Pattern")
-
-    cursor.execute(f"""
-    SELECT date,SUM(amount)
-    FROM {user_table}
-    GROUP BY date
-    ORDER BY date DESC
-    LIMIT 5
-    """)
-
-    data = cursor.fetchall()
-
-    if data:
-        df = pd.DataFrame(data,columns=["Date","Total"])
-        st.table(df)
-
-    # Prediction
     st.subheader("📈 Prediction")
 
     cursor.execute(f"""
@@ -249,4 +268,4 @@ if menu == "Insights":
         st.success(f"Estimated next month spend: ₹{avg:,.0f}")
 
 st.markdown("---")
-st.caption("🏆 Hackathon Ready Project - Smart AI Expense Tracker")
+st.caption("🏆 Final Hackathon Ready Project")
