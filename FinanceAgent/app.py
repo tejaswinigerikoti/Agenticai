@@ -293,7 +293,7 @@ if menu == "Yearly Report":
 
 # ---------------- INSIGHTS ----------------
 if menu == "Insights":
-    st.subheader("Spending Insights")
+    st.subheader("Spending Insights (Category Wise %)")
 
     cursor.execute(f"SELECT category,SUM(amount) FROM {user_table} GROUP BY category")
     data = cursor.fetchall()
@@ -305,20 +305,7 @@ if menu == "Insights":
         for _, row in df.iterrows():
             percent = (row["Total"] / total) * 100
             st.write(f"{row['Category']} : {percent:.1f}%")
-
-    st.subheader("Next Month Prediction")
-
-    cursor.execute(f"""
-    SELECT strftime('%Y-%m',date),SUM(amount)
-    FROM {user_table}
-    GROUP BY 1
-    ORDER BY 1 DESC
-    LIMIT 3
-    """)
-    last3 = cursor.fetchall()
-
-    if len(last3) >= 3:
-        avg = sum([x[1] for x in last3]) / 3
-        st.success(f"Estimated next month spend: ₹{avg:,.0f}")
+    else:
+        st.info("No data available")
 
 st.markdown("---")
