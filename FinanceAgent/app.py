@@ -1,17 +1,17 @@
 import streamlit as st
 import sqlite3
 import pandas as pd
-from datetime import date
+from datetime import date, datetime
 import hashlib
 import os
 import io
 
-st.set_page_config(page_title="Smart AI Expense Tracker", layout="wide")
+st.set_page_config(page_title="Expense Tracker", layout="wide")
 
-LOGIN_FILE = "login.txt"
 DB_FILE = "expenses.db"
+LOGIN_FILE = "login.txt"
 
-# ---------------- SESSION ----------------
+# ---------------- AUTO LOGIN ----------------
 if "user_email" not in st.session_state:
     if os.path.exists(LOGIN_FILE):
         with open(LOGIN_FILE, "r") as f:
@@ -19,35 +19,75 @@ if "user_email" not in st.session_state:
     else:
         st.session_state.user_email = None
 
-# ---------------- LOGIN ----------------
-def login_page():
-    st.title("🔐 Smart AI Expense Tracker")
-    st.caption("AI Powered Financial Assistant 💡")
-
-    email = st.text_input("Email")
-    password = st.text_input("Password", type="password")
-
-    if st.button("Login"):
-        if email and password == "123456":
-            st.session_state.user_email = email
-            with open(LOGIN_FILE, "w") as f:
-                f.write(email)
-            st.rerun()
-        else:
-            st.error("Invalid Login")
-
-if not st.session_state.user_email:
-    login_page()
-    st.stop()
-
 # ---------------- DATABASE ----------------
 conn = sqlite3.connect(DB_FILE, check_same_thread=False)
 cursor = conn.cursor()
 
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS users(
+email TEXT PRIMARY KEY,
+password TEXT
+)
+""")
+conn.commit()
+
+# ---------------- LOGIN / REGISTER ----------------
+def login_page():
+    st.title("Expense Tracker")
+    st.caption("Login or Register")
+
+    option = st.radio("Select Option", ["Login", "Register"])
+    email = st.text_input("Email")
+
+    if option == "Register":
+        new_pass = st.text_input("New Password", type="password")
+        confirm_pass = st.text_input("Confirm Password", type="password")
+
+        if st.button("Create Account"):
+            if new_pass != confirm_pass:
+                st.error("Passwords do not match")
+            elif email == "" or new_pass == "":
+                st.warning("Enter all details")
+            else:
+                cursor.execute("SELECT * FROM users WHERE email=?", (email,))
+                if cursor.fetchone():
+                    st.error("User already exists")
+                else:
+                    cursor.execute("INSERT INTO users(email,password) VALUES(?,?)", (email, new_pass))
+                    conn.commit()
+                    st.success("Account created! Please login.")
+
+    if option == "Login":
+        password = st.text_input("Password", type="password")
+
+        if st.button("Login"):
+            cursor.execute("SELECT * FROM users WHERE email=? AND password=?", (email, password))
+            user = cursor.fetchone()
+
+            if user:
+                st.session_state.user_email = email
+                with open(LOGIN_FILE, "w") as f:
+                    f.write(email)
+                st.rerun()
+            else:
+                st.error("Invalid Email or Password")
+
+# If not logged in
+if not st.session_state.user_email:
+    login_page()
+    st.stop()
+
+# ---------------- USER ----------------
+username = st.session_state.user_email.split("@")[0]
+
+st.title("Expense Tracker Dashboard")
+st.caption(f"Welcome, {username}")
+st.divider()
+
+# ---------------- USER DATABASE ----------------
 user_id = hashlib.md5(st.session_state.user_email.encode()).hexdigest()[:8]
 user_table = f"expenses_{user_id}"
 
-# Expense table
 cursor.execute(f"""
 CREATE TABLE IF NOT EXISTS {user_table}(
 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -58,7 +98,6 @@ description TEXT
 )
 """)
 
-# Budget table
 cursor.execute("""
 CREATE TABLE IF NOT EXISTS user_budget(
 user TEXT PRIMARY KEY,
@@ -82,14 +121,9 @@ menu = st.sidebar.selectbox(
     ["Dashboard", "Add Expense", "Reports", "Monthly Report", "Yearly Report", "Insights"]
 )
 
-st.title(f"💰 Smart AI Expense Tracker - {st.session_state.user_email}")
-
-# =====================================================
-# DASHBOARD
-# =====================================================
+# ---------------- DASHBOARD ----------------
 if menu == "Dashboard":
-
-    st.subheader("📊 Dashboard")
+    st.subheader("Dashboard Overview")
 
     cursor.execute(f"SELECT SUM(amount) FROM {user_table}")
     total_spent = cursor.fetchone()[0] or 0
@@ -101,7 +135,6 @@ if menu == "Dashboard":
     """)
     month_spent = cursor.fetchone()[0] or 0
 
-    # Load saved budget
     cursor.execute("SELECT budget FROM user_budget WHERE user=?", (user_id,))
     result = cursor.fetchone()
 
@@ -113,127 +146,121 @@ if menu == "Dashboard":
         st.progress(min(month_spent / budget, 1.0))
         st.write(f"Budget Used: {percent:.1f}%")
 
-        if percent >= 100:
-            st.error("❌ Budget Exceeded!")
-        elif percent >= 80:
-            st.warning("⚠️ 80% budget used")
-        elif percent >= 50:
-            st.info("ℹ️ 50% budget used")
-
-        with st.expander("✏️ Update Budget"):
+        with st.expander("Update Budget"):
             new_budget = st.number_input("Enter New Budget ₹", min_value=100.0, step=500.0)
             if st.button("Update Budget"):
                 cursor.execute("UPDATE user_budget SET budget=? WHERE user=?", (new_budget, user_id))
                 conn.commit()
-                st.success("Budget Updated ✅")
+                st.success("Budget Updated")
                 st.rerun()
-
     else:
         st.warning("No budget set")
         new_budget = st.number_input("Set Monthly Budget ₹", min_value=100.0, step=500.0)
         if st.button("Save Budget"):
             cursor.execute("INSERT INTO user_budget(user,budget) VALUES(?,?)", (user_id, new_budget))
             conn.commit()
-            st.success("Budget Saved ✅")
+            st.success("Budget Saved")
             st.rerun()
 
     c1, c2 = st.columns(2)
     c1.metric("Total Spent", f"₹{total_spent:,.0f}")
     c2.metric("This Month", f"₹{month_spent:,.0f}")
 
-# =====================================================
-# ADD EXPENSE
-# =====================================================
+# ---------------- ADD EXPENSE ----------------
 if menu == "Add Expense":
-
-    st.subheader("➕ Add Expense")
+    st.subheader("Add New Expense")
 
     col1, col2 = st.columns(2)
 
     with col1:
         expense_date = st.date_input("Date", value=date.today())
-        categories = ["Food", "Transport", "Shopping", "Bills", "Medical", "Other"]
-        category = st.selectbox("Category", categories)
-
-        custom = ""
+        category = st.selectbox("Category", ["Food", "Transport", "Shopping", "Bills", "Medical", "Other"])
         if category == "Other":
-            custom = st.text_input("Enter Custom Category")
-
-        final_category = custom.strip() if custom.strip() else category
+            category = st.text_input("Custom Category")
 
     with col2:
         amount = st.number_input("Amount ₹", min_value=1.0)
         description = st.text_input("Description")
 
-    if description:
-        desc = description.lower()
-        if "uber" in desc or "bus" in desc:
-            final_category = "Transport"
-        elif "pizza" in desc or "food" in desc:
-            final_category = "Food"
-        elif "amazon" in desc:
-            final_category = "Shopping"
-
     if st.button("Save Expense"):
+        formatted_date = expense_date.strftime("%Y-%m-%d")
         cursor.execute(
             f"INSERT INTO {user_table} (date,amount,category,description) VALUES (?,?,?,?)",
-            (str(expense_date), amount, final_category, description)
+            (formatted_date, amount, category, description)
         )
         conn.commit()
-        st.success("Expense Added ✅")
+        st.success("Expense Added")
 
-# =====================================================
-# REPORTS
-# =====================================================
+# ---------------- REPORTS ----------------
 if menu == "Reports":
-
-    st.subheader("📄 All Expenses")
+    st.subheader("All Expenses")
 
     cursor.execute(f"SELECT * FROM {user_table}")
     data = cursor.fetchall()
 
     if data:
         df = pd.DataFrame(data, columns=["ID", "Date", "Amount", "Category", "Description"])
-        st.dataframe(df, use_container_width=True)
+        df = df.sort_values(by="ID", ascending=True).reset_index(drop=True)
 
-        # Excel download
+        h1, h2, h3, h4, h5, h6 = st.columns([1,2,2,2,3,1])
+        h1.write("S.No")
+        h2.write("Date")
+        h3.write("Amount")
+        h4.write("Category")
+        h5.write("Description")
+        h6.write("Delete")
+        st.write("---")
+
+        for index, row in df.iterrows():
+            c1, c2, c3, c4, c5, c6 = st.columns([1,2,2,2,3,1])
+
+            c1.write(index + 1)
+            formatted_date = datetime.strptime(row["Date"], "%Y-%m-%d").strftime("%d/%m/%Y")
+            c2.write(formatted_date)
+            c3.write(f"₹{row['Amount']}")
+            c4.write(row["Category"])
+            c5.write(row["Description"])
+
+            if c6.button("🗑️", key=row["ID"]):
+                cursor.execute(f"DELETE FROM {user_table} WHERE id=?", (row["ID"],))
+                conn.commit()
+                st.warning("Expense Deleted")
+                st.rerun()
+
+        # Excel Download
+        st.write("---")
+        df["Date"] = pd.to_datetime(df["Date"]).dt.strftime("%d/%m/%Y")
         output = io.BytesIO()
         with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
             df.to_excel(writer, index=False, sheet_name='Expenses')
 
         st.download_button(
-            "📥 Download Excel",
+            "Download Excel",
             data=output.getvalue(),
             file_name="expenses.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
+
     else:
-        st.info("No data")
+        st.info("No data available")
 
     # Date filter
-    st.subheader("📅 Search by Date")
+    st.subheader("Search by Date")
     selected_date = st.date_input("Select Date")
 
-    cursor.execute(f"""
-    SELECT date,amount,category,description
-    FROM {user_table}
-    WHERE date=?
-    """, (str(selected_date),))
-
+    cursor.execute(f"SELECT * FROM {user_table} WHERE date=?", (selected_date.strftime("%Y-%m-%d"),))
     rows = cursor.fetchall()
 
     if rows:
-        df_day = pd.DataFrame(rows, columns=["Date", "Amount", "Category", "Description"])
+        df_day = pd.DataFrame(rows, columns=["ID", "Date", "Amount", "Category", "Description"])
+        df_day["Date"] = pd.to_datetime(df_day["Date"]).dt.strftime("%d/%m/%Y")
         st.dataframe(df_day, use_container_width=True)
     else:
         st.info("No expenses on this date")
 
-# =====================================================
-# MONTHLY REPORT
-# =====================================================
+# ---------------- MONTHLY ----------------
 if menu == "Monthly Report":
-
-    st.subheader("📅 Monthly Report")
+    st.subheader("Monthly Report")
 
     cursor.execute(f"""
     SELECT strftime('%Y-%m',date) as Month, SUM(amount)
@@ -241,19 +268,16 @@ if menu == "Monthly Report":
     GROUP BY Month
     ORDER BY Month DESC
     """)
-
     data = cursor.fetchall()
 
     if data:
         df = pd.DataFrame(data, columns=["Month", "Total Spent"])
+        df["Month"] = pd.to_datetime(df["Month"]).dt.strftime("%m/%Y")
         st.dataframe(df, use_container_width=True)
 
-# =====================================================
-# YEARLY REPORT
-# =====================================================
+# ---------------- YEARLY ----------------
 if menu == "Yearly Report":
-
-    st.subheader("📆 Yearly Report")
+    st.subheader("Yearly Report")
 
     cursor.execute(f"""
     SELECT strftime('%Y',date) as Year, SUM(amount)
@@ -261,25 +285,17 @@ if menu == "Yearly Report":
     GROUP BY Year
     ORDER BY Year DESC
     """)
-
     data = cursor.fetchall()
 
     if data:
         df = pd.DataFrame(data, columns=["Year", "Total Spent"])
         st.dataframe(df, use_container_width=True)
 
-# =====================================================
-# INSIGHTS
-# =====================================================
+# ---------------- INSIGHTS ----------------
 if menu == "Insights":
+    st.subheader("Spending Insights")
 
-    st.subheader("🧠 Smart Insights")
-
-    cursor.execute(f"""
-    SELECT category,SUM(amount)
-    FROM {user_table}
-    GROUP BY category
-    """)
+    cursor.execute(f"SELECT category,SUM(amount) FROM {user_table} GROUP BY category")
     data = cursor.fetchall()
 
     if data:
@@ -288,14 +304,9 @@ if menu == "Insights":
 
         for _, row in df.iterrows():
             percent = (row["Total"] / total) * 100
-            st.write(f"👉 {row['Category']} takes {percent:.1f}%")
+            st.write(f"{row['Category']} : {percent:.1f}%")
 
-            if percent > 40:
-                st.warning(f"⚠️ High spending on {row['Category']}")
-            elif percent < 10:
-                st.success(f"✅ Good control on {row['Category']}")
-
-    st.subheader("📈 Prediction")
+    st.subheader("Next Month Prediction")
 
     cursor.execute(f"""
     SELECT strftime('%Y-%m',date),SUM(amount)
@@ -304,7 +315,6 @@ if menu == "Insights":
     ORDER BY 1 DESC
     LIMIT 3
     """)
-
     last3 = cursor.fetchall()
 
     if len(last3) >= 3:
@@ -312,4 +322,3 @@ if menu == "Insights":
         st.success(f"Estimated next month spend: ₹{avg:,.0f}")
 
 st.markdown("---")
-st.caption("🏆 Final Hackathon Ready Project")
